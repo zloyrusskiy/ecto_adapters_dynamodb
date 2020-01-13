@@ -142,18 +142,24 @@ defmodule Ecto.Adapters.DynamoDB do
 
   We rely on ExAws encoding functionality during insertion and update to properly format types for DynamoDB. Please see ExAws `ExAws.Dynamo.update_item` and `ExAws.Dynamo.put_item` for specifics. Currently, we only modify :utc_datetime and :naive_datetime, appending the UTC offset, "Z", to the datetime string before passing to ExAws.
   """
-  def dumpers(:utc_datetime, datetime), do: [datetime, &to_iso_string/1]
-  def dumpers(:naive_datetime, datetime), do: [datetime, &to_iso_string/1]
+  @spec dumpers(primitive_type :: Ecto.Type.primitive(), ecto_type :: Ecto.Type.t()) ::
+  [(term() -> {:ok, term()} | :error) | Ecto.Type.t()]
+  def dumpers(:utc_datetime, datetime), do: [datetime, &datetime_to_iso_string/1]
+  def dumpers(:naive_datetime, datetime), do: [datetime, &naive_datetime_to_iso_string/1]
+  def dumpers(:utc_datetime_usec, datetime), do: [datetime, &datetime_to_iso_string/1]
+  def dumpers(:naive_datetime_usec, datetime), do: [datetime, &naive_datetime_to_iso_string/1]
   def dumpers(_primitive, type), do: [type]
 
   # Add UTC offset
-  # We are adding the offset here also for the :naive_datetime, this
-  # assumes we are getting a UTC date (which does correspond with the
-  # timestamps() macro but not necessarily with :naive_datetime in general)
-  defp to_iso_string(datetime) do
-    {:ok, (datetime |> Ecto.DateTime.cast! |> Ecto.DateTime.to_iso8601) <> "Z"}
+  # https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/DynamoDBMapper.DataTypes.html
+  # Date (as ISO_8601 millisecond-precision string, shifted to UTC)
+  defp datetime_to_iso_string(datetime) do
+    {:ok, (datetime |> DateTime.truncate(:millisecond) |> DateTime.to_iso8601) <> "Z"}
   end
 
+  defp naive_datetime_to_iso_string(datetime) do
+    {:ok, (datetime |> NaiveDateTime.truncate(:millisecond) |> NaiveDateTime.to_iso8601) <> "Z"}
+  end
 
   @doc """
   Commands invoked to prepare a query for `all`, `update_all` and `delete_all`.
