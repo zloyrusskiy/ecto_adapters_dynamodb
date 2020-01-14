@@ -19,6 +19,8 @@ defmodule Ecto.Adapters.DynamoDB do
   #@behaviour Ecto.Adapter.Storage
   #@behaviour Ecto.Adapter.Migration
 
+  @typep dynamo_isodate :: String.t
+
   defmacro __before_compile__(_env) do
     # Nothing to see here, yet...
 
@@ -51,7 +53,8 @@ defmodule Ecto.Adapters.DynamoDB do
 
     meta = %{
       opts: [timeout: 15000, pool_size: 10],
-      telemetry: {config[:repo], :debug, config[:telemetry_prefix]}
+      telemetry: {config[:repo], :debug, config[:telemetry_prefix]},
+      config: config
     }
 
     ecto_dynamo_log(:debug, "#{inspect __MODULE__}.init", %{"#{inspect __MODULE__}.init-params" => %{config: config}})
@@ -142,21 +145,22 @@ defmodule Ecto.Adapters.DynamoDB do
 
   We rely on ExAws encoding functionality during insertion and update to properly format types for DynamoDB. Please see ExAws `ExAws.Dynamo.update_item` and `ExAws.Dynamo.put_item` for specifics. Currently, we only modify :utc_datetime and :naive_datetime, appending the UTC offset, "Z", to the datetime string before passing to ExAws.
   """
-  @spec dumpers(primitive_type :: Ecto.Type.primitive(), ecto_type :: Ecto.Type.t()) ::
-  [(term() -> {:ok, term()} | :error) | Ecto.Type.t()]
-  def dumpers(:utc_datetime, datetime), do: [datetime, &datetime_to_iso_string/1]
-  def dumpers(:naive_datetime, datetime), do: [datetime, &naive_datetime_to_iso_string/1]
-  def dumpers(:utc_datetime_usec, datetime), do: [datetime, &datetime_to_iso_string/1]
-  def dumpers(:naive_datetime_usec, datetime), do: [datetime, &naive_datetime_to_iso_string/1]
+  @impl Ecto.Adapter
+  def dumpers(:utc_datetime, %DateTime{} = datetime), do: [datetime, &datetime_to_iso_string/1]
+  def dumpers(:utc_datetime_usec, %DateTime{} = datetime), do: [datetime, &datetime_to_iso_string/1]
+  def dumpers(:naive_datetime, %NaiveDateTime{} = datetime), do: [datetime, &naive_datetime_to_iso_string/1]
+  def dumpers(:naive_datetime_usec, %NaiveDateTime{} = datetime), do: [datetime, &naive_datetime_to_iso_string/1]
   def dumpers(_primitive, type), do: [type]
 
   # Add UTC offset
   # https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/DynamoDBMapper.DataTypes.html
   # Date (as ISO_8601 millisecond-precision string, shifted to UTC)
+  @spec datetime_to_iso_string(DateTime.t) :: {:ok, dynamo_isodate()}
   defp datetime_to_iso_string(datetime) do
     {:ok, (datetime |> DateTime.truncate(:millisecond) |> DateTime.to_iso8601) <> "Z"}
   end
 
+  @spec datetime_to_iso_string(NaiveDateTime.t) :: {:ok, dynamo_isodate()}
   defp naive_datetime_to_iso_string(datetime) do
     {:ok, (datetime |> NaiveDateTime.truncate(:millisecond) |> NaiveDateTime.to_iso8601) <> "Z"}
   end
