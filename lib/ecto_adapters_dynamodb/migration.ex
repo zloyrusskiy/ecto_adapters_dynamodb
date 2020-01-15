@@ -121,7 +121,6 @@ defmodule Ecto.Adapters.DynamoDB.Migration do
   ```
   """
 
-
   # DynamoDB has restrictions on what can be done while tables are being created or
   # updated so we allow for a custom wait between requests if certain resource-access
   # errors are returned
@@ -129,16 +128,15 @@ defmodule Ecto.Adapters.DynamoDB.Migration do
   @wait_exponent Application.get_env(:ecto_adapters_dynamodb, :migration_wait_exponent) || 1.05
   @max_wait Application.get_env(:ecto_adapters_dynamodb, :migration_max_wait) || 10 * 60 * 1000 # 10 minutes
 
-  # Adapted from line 620, https://github.com/michalmuskala/mongodb_ecto/blob/master/lib/mongo_ecto.ex
-  def execute_ddl(_repo, string, _opts) when is_binary(string) do
+  def execute_ddl(_adapter_meta, string, _opts) when is_binary(string) do
     raise ArgumentError, message: "Ecto.Adapters.Dynamodb does not support SQL statements in `execute`"
   end
 
-  def execute_ddl(repo, command, options) do
-    ecto_dynamo_log(:debug, "#{inspect __MODULE__}.execute_ddl", %{"#{inspect __MODULE__}.execute_ddl-params" => %{repo: repo, command: command, options: options}})
+  def execute_ddl(adapter_meta, command, options) do
+    ecto_dynamo_log(:debug, "#{inspect __MODULE__}.execute_ddl", %{"#{inspect __MODULE__}.execute_ddl-params" => %{adapter_meta: adapter_meta, command: command, options: options}})
 
     # We provide a configuration option for migration_table_capacity
-    updated_command = maybe_add_schema_migration_table_capacity(repo, command)
+    updated_command = maybe_add_schema_migration_table_capacity(adapter_meta, command)
 
     execute_ddl(updated_command)
   end
@@ -224,10 +222,10 @@ defmodule Ecto.Adapters.DynamoDB.Migration do
   def execute_ddl({command, struct}), do:
   raise ArgumentError, message: "#{inspect __MODULE__}.execute_ddl error: '" <> to_string(command) <> " #{extract_ecto_migration_type(inspect struct.__struct__)}' is not supported"
 
-
   # We provide a configuration option for migration_table_capacity
-  defp maybe_add_schema_migration_table_capacity(repo, {:create_if_not_exists, %Ecto.Migration.Table{} = table, field_clauses} = command) do
-    migration_source = Keyword.get(repo.config, :migration_source, "schema_migrations")
+  @spec maybe_add_schema_migration_table_capacity(Ecto.Adapter.Migration.adapter_meta, Ecto.Adapter.Migration.command) :: Ecto.Adapter.Migration.command
+  defp maybe_add_schema_migration_table_capacity(adapter_meta, {:create_if_not_exists, %Ecto.Migration.Table{} = table, field_clauses} = command) do
+    migration_source = Keyword.get(adapter_meta.config, :migration_source, "schema_migrations")
 
     if to_string(table.name) == migration_source do
       migration_table_capacity = Application.get_env(:ecto_adapters_dynamodb, :migration_table_capacity) || [1,1]
@@ -240,7 +238,7 @@ defmodule Ecto.Adapters.DynamoDB.Migration do
       command
     end
   end
-  defp maybe_add_schema_migration_table_capacity(_repo, command), do: command
+  defp maybe_add_schema_migration_table_capacity(_adapter_meta, command), do: command
 
   defp poll_table(table_name) do
     table_info = Dynamo.describe_table(table_name) |> ExAws.request

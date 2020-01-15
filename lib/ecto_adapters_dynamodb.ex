@@ -17,10 +17,11 @@ defmodule Ecto.Adapters.DynamoDB do
   @behaviour Ecto.Adapter.Schema
   @behaviour Ecto.Adapter.Queryable
   #@behaviour Ecto.Adapter.Storage
-  #@behaviour Ecto.Adapter.Migration
+  @behaviour Ecto.Adapter.Migration
 
   @typep dynamo_isodate :: String.t
 
+  @impl Ecto.Adapter
   defmacro __before_compile__(_env) do
     # Nothing to see here, yet...
 
@@ -42,8 +43,8 @@ defmodule Ecto.Adapters.DynamoDB do
     Agent.start_link fn -> [] end
   end
 
-  ## Adapter behaviour - defined in lib/ecto/adapter.ex (in the ecto github repository)
-
+  @impl Ecto.Adapter
+  @spec init(config :: Keyword.t()) :: {:ok, :supervisor.child_spec(), Ecto.Adapter.adapter_meta()}
   def init(config) do
     child = %{
       id: __MODULE__,
@@ -89,6 +90,9 @@ defmodule Ecto.Adapters.DynamoDB do
   @doc """
   Ensure all applications necessary to run the adapter are started.
   """
+  @impl Ecto.Adapter
+  @spec ensure_all_started(config :: Keyword.t(), type :: Application.restart_type()) ::
+  {:ok, [atom()]} | {:error, atom()}
   def ensure_all_started(repo, type) do
     ecto_dynamo_log(:debug, "#{inspect __MODULE__}.ensure_all_started", %{"#{inspect __MODULE__}.ensure_all_started-params" => %{type: type, repo: repo}})
 
@@ -98,12 +102,23 @@ defmodule Ecto.Adapters.DynamoDB do
     end
   end
 
+  @impl Ecto.Adapter.Migration
+  @spec supports_ddl_transaction?() :: boolean()
   def supports_ddl_transaction?, do: false
 
-  def execute_ddl(repo, command, options) do
-    Ecto.Adapters.DynamoDB.Migration.execute_ddl(repo, command, options)
+  @impl Ecto.Adapter.Migration
+  @spec execute_ddl(Ecto.Adapter.Migration.adapter_meta(), Ecto.Adapter.Migration.command(), options :: Keyword.t()) ::
+  {:ok, [{Logger.level(), Logger.message(), Logger.metadata()}]}
+  def execute_ddl(adapter_meta, command, options) do
+    Ecto.Adapters.DynamoDB.Migration.execute_ddl(adapter_meta, command, options)
   end
 
+  @impl Ecto.Adapter.Migration
+  @spec lock_for_migrations(Ecto.Adapter.Migration.adapter_meta(), Ecto.Query.t(), options :: Keyword.t(), fun) ::
+  result when fun: (Ecto.Query.t() -> result), result: var
+  def lock_for_migrations(_adapter_meta, query, _options, callback) do
+    callback.(query)
+  end
 
 # moved to transaction.ex in ecto 2.1.4
 #  def in_transaction?(_repo), do: false
@@ -126,6 +141,8 @@ defmodule Ecto.Adapters.DynamoDB do
   """
 
   @max_id ((1 <<< 128) - 1) # biggest possible int in 128 bits
+  @impl Ecto.Adapter.Schema
+  @spec autogenerate(field_type :: :id | :binary_id | :embed_id) :: term() | nil
   def autogenerate(:id), do: Enum.random(1..@max_id)
   def autogenerate(:embed_id), do: Ecto.UUID.generate()
   def autogenerate(:binary_id), do: Ecto.UUID.generate()
@@ -136,6 +153,9 @@ defmodule Ecto.Adapters.DynamoDB do
   Rather than use the Ecto adapter loaders callback, the adapter builds on ExAws' decoding functionality, please see ExAws's `ExAws.Dynamo.decode_item` and the private function, `custom_decode`, in this module, which at this time only loads :utc_datetime and :naive_datetime.
 
   """
+  @impl Ecto.Adapter
+  @spec loaders(primitive_type :: Ecto.Type.primitive(), ecto_type :: Ecto.Type.t()) ::
+  [(term() -> {:ok, term()} | :error) | Ecto.Type.t()]
   def loaders(_primitive, type), do: [type]
 
 
@@ -146,6 +166,8 @@ defmodule Ecto.Adapters.DynamoDB do
   We rely on ExAws encoding functionality during insertion and update to properly format types for DynamoDB. Please see ExAws `ExAws.Dynamo.update_item` and `ExAws.Dynamo.put_item` for specifics. Currently, we only modify :utc_datetime and :naive_datetime, appending the UTC offset, "Z", to the datetime string before passing to ExAws.
   """
   @impl Ecto.Adapter
+  @spec dumpers(primitive_type :: Ecto.Type.primitive(), ecto_type :: Ecto.Type.t()) ::
+  [(term() -> {:ok, term()} | :error) | Ecto.Type.t()]
   def dumpers(:utc_datetime, %DateTime{} = datetime), do: [datetime, &datetime_to_iso_string/1]
   def dumpers(:utc_datetime_usec, %DateTime{} = datetime), do: [datetime, &datetime_to_iso_string/1]
   def dumpers(:naive_datetime, %NaiveDateTime{} = datetime), do: [datetime, &naive_datetime_to_iso_string/1]
@@ -172,6 +194,9 @@ defmodule Ecto.Adapters.DynamoDB do
   """
   #@callback prepare(atom :: :all | :update_all | :delete_all, query :: Ecto.Query.t) ::
   #          {:cache, prepared} | {:nocache, prepared}
+  @impl Ecto.Adapter.Queryable
+  @spec prepare(atom :: :all | :update_all | :delete_all, query :: Ecto.Query.t()) ::
+  {:cache, Ecto.Adapter.Queryable.prepared()} | {:nocache, Ecto.Adapter.Queryable.prepared()}
   def prepare(:all, query) do
     # 'preparing' is more a SQL concept - Do we really need to do anything here or just pass the params through?
     ecto_dynamo_log(:debug, "#{inspect __MODULE__}.prepare: :all", %{"#{inspect __MODULE__}.prepare-params" => %{query: inspect(query, structs: false)}})
@@ -220,8 +245,16 @@ defmodule Ecto.Adapters.DynamoDB do
 
 
   # the 5th arg, process, has been dropped
-  def execute(%{repo: repo}, meta, {:nocache, {func, prepared}}, params, opts) do
-    ecto_dynamo_log(:debug, "#{inspect __MODULE__}.execute", %{"#{inspect __MODULE__}.execute-params" => %{repo: repo, meta: meta, prepared: prepared, params: params, opts: opts}})
+  @impl Ecto.Adapter.Queryable
+  @spec execute(
+    Ecto.Adapter.Queryable.adapter_meta(),
+    Ecto.Adapter.Queryable.query_meta(),
+    Ecto.Adapter.Queryable.query_cache(),
+    params :: list(),
+    Ecto.Adapter.Queryable.options()
+  ) :: {integer(), [[term()]] | nil}
+  def execute(adapter_meta, query_meta, {:nocache, {func, prepared}}, params, opts) do
+    ecto_dynamo_log(:debug, "#{inspect __MODULE__}.execute", %{"#{inspect __MODULE__}.execute-params" => %{adapter_meta: adapter_meta, query_meta: query_meta, prepared: prepared, params: params, opts: opts}})
 
     {table, model} = prepared.from.source # table and model are now nested under .from.source
     validate_where_clauses!(prepared)
@@ -232,7 +265,8 @@ defmodule Ecto.Adapters.DynamoDB do
 
     # Ecto migration does not know to specify 'scan: true' to retrieve the persisted migration versions
     # from line 34, file "deps/ecto/lib/ecto/migration/schema_migration.ex"
-    migration_source = Keyword.get(repo.config, :migration_source, "schema_migrations")
+    migration_source = Keyword.get(adapter_meta.config, :migration_source, "schema_migrations")
+
     updated_opts = if table == migration_source do
       ecto_dynamo_log(:debug, "#{inspect __MODULE__}.execute: table name corresponds with migration source: #{inspect migration_source}. Setting options for recursive scan.", %{})
 
@@ -517,6 +551,15 @@ defmodule Ecto.Adapters.DynamoDB do
   #@callback insert(repo, schema_meta, fields, on_conflict, returning, options) ::
   #                  {:ok, fields} | {:invalid, constraints} | no_return
   #  def insert(_,_,_,_,_) do
+  @impl Ecto.Adapter.Schema
+  @spec insert(
+    Ecto.Adapter.Schema.adapter_meta(),
+    Ecto.Adapter.Schema.schema_meta(),
+    Ecto.Adapter.Schema.fields(),
+    Ecto.Adapter.Schema.on_conflict(),
+    Ecto.Adapter.Schema.returning(),
+    Ecto.Adapter.Schema.options()
+  ) :: {:ok, Ecto.Adapter.Schema.fields()} | {:invalid, Ecto.Adapter.Schema.constraints()}
   def insert(repo, schema_meta, fields, on_conflict, returning, opts) do
     ecto_dynamo_log(:debug, "#{inspect __MODULE__}.insert", %{"#{inspect __MODULE__}.insert-params" => %{repo: repo, schema_meta: schema_meta, fields: fields, on_conflict: on_conflict, returning: returning, opts: opts}})
 
@@ -569,7 +612,16 @@ defmodule Ecto.Adapters.DynamoDB do
     end
   end
 
-
+  @impl Ecto.Adapter.Schema
+  @spec insert_all(
+    Ecto.Adapter.Schema.adapter_meta(),
+    Ecto.Adapter.Schema.schema_meta(),
+    header :: [atom()],
+    [[{atom(), term() | {Ecto.Query.t(), list()}}]],
+    Ecto.Adapter.Schema.on_conflict(),
+    Ecto.Adapter.Schema.returning(),
+    Ecto.Adapter.Schema.options()
+  ) :: {integer(), [[term()]] | nil}
   def insert_all(repo, schema_meta, field_list, fields, on_conflict, returning, opts) do
     ecto_dynamo_log(:debug, "#{inspect __MODULE__}.insert_all", %{"#{inspect __MODULE__}.insert_all-params" => %{repo: repo, schema_meta: schema_meta, field_list: field_list, fields: fields, on_conflict: on_conflict, returning: returning, opts: opts}})
 
@@ -665,6 +717,9 @@ defmodule Ecto.Adapters.DynamoDB do
 
   # In testing, 'filters' contained only the primary key and value
   # TODO: handle cases of more than one tuple in 'filters'?
+  @impl Ecto.Adapter.Schema
+  @spec delete(Ecto.Adapter.Schema.adapter_meta(), Ecto.Adapter.Schema.schema_meta(), Ecto.Adapter.Schema.filters(), Ecto.Adapter.Schema.options()) ::
+  {:ok, Ecto.Adapter.Schema.fields()} | {:invalid, Ecto.Adapter.Schema.constraints()} | {:error, :stale}
   def delete(repo, schema_meta, filters, opts) do
     ecto_dynamo_log(:debug, "#{inspect __MODULE__}.delete", %{"#{inspect __MODULE__}.delete-params" => %{repo: repo, schema_meta: schema_meta, filters: filters, opts: opts}})
 
@@ -718,6 +773,15 @@ defmodule Ecto.Adapters.DynamoDB do
   end
 
 
+  @impl Ecto.Adapter.Schema
+  @spec update(
+    Ecto.Adapter.Schema.adapter_meta(),
+    Ecto.Adapter.Schema.schema_meta(),
+    Ecto.Adapter.Schema.fields(),
+    Ecto.Adapter.Schema.filters(),
+    Ecto.Adapter.Schema.returning(),
+    Ecto.Adapter.Schema.options()
+  ) :: {:ok, Ecto.Adapter.Schema.fields()} | {:invalid, Ecto.Adapter.Schema.constraints()} | {:error, :stale}
   def update(repo, schema_meta, fields, filters, returning, opts) do
     ecto_dynamo_log(:debug, "#{inspect __MODULE__}.update", %{"#{inspect __MODULE__}.update-params" => %{repo: repo, schema_meta: schema_meta, fields: fields, filters: filters, returning: returning, opts: opts}})
 
@@ -1129,10 +1193,9 @@ defmodule Ecto.Adapters.DynamoDB do
       Map.put(acc, key, v)
     end)
 
-    %{"Item" => item}
-    |> Dynamo.decode_item(as: model)
-    |> Ecto.put_meta(state: :loaded)
-    |> custom_decode(model, select)
+    ecto_item = %{"Item" => item} |> Dynamo.decode_item(as: model)
+
+    Enum.map(select.fields, fn {{_, _, [_, key]}, _, _} -> Map.get(ecto_item, key) end)
   end
 
   # This is used slightly differently
