@@ -24,9 +24,9 @@ defmodule Ecto.Adapters.DynamoDB.Migration do
           global_indexes: [
             [index_name: "email_content",
              keys: [:email, :content],
-             provisioned_throughput: [100, 100]] # [read_capacity, write_capacity]
+             provisioned_throughput: {100, 100}] # {read_capacity, write_capacity}
             ],
-          provisioned_throughput: [20,20]
+          provisioned_throughput: {20,20}
         ]) do
 
         add :email,   :string, primary_key: true  # primary composite key
@@ -72,7 +72,7 @@ defmodule Ecto.Adapters.DynamoDB.Migration do
             [index_name: "content",
              keys: [:content],
              create_if_not_exists: true,
-             provisioned_throughput: [1,1],
+             provisioned_throughput: {1,1},
              projection: [projection_type: :include, non_key_attributes: [:email]]]
           ]
         ]) do
@@ -99,7 +99,7 @@ defmodule Ecto.Adapters.DynamoDB.Migration do
     def up do
       alter table(:post) do
         # modify will not be processed in a rollback if 'change' is used
-        modify :"email_content", :string, provisioned_throughput: [2,2]
+        modify :"email_content", :string, provisioned_throughput: {2,2}
         remove :content
       end
     end
@@ -114,12 +114,23 @@ defmodule Ecto.Adapters.DynamoDB.Migration do
           ]
         ]) do
 
-        modify :"email_content", :string, provisioned_throughput: [100,100]
+        modify :"email_content", :string, provisioned_throughput: {100,100}
         add :content, :string
       end
     end
   ```
   """
+
+  @type ddl_logs ::ddl_logs
+
+  @type provisioned_throughput :: {integer(), integer()}
+  @type billing_mode :: :pay_per_request | :provisioned
+  @type table_option :: keyword()
+    | {:billing_mode, ExAws.Dynamo.dynamo_billing_types()}
+    | {:provisioned_throughput, provisioned_throughput()}
+    | {:global_indexes, list(keyword())}
+    | {:local_indexes, list(keyword())}
+  @type table_options :: keyword(table_option())
 
   # DynamoDB has restrictions on what can be done while tables are being created or
   # updated so we allow for a custom wait between requests if certain resource-access
@@ -138,7 +149,8 @@ defmodule Ecto.Adapters.DynamoDB.Migration do
     # We provide a configuration option for migration_table_capacity
     updated_command = maybe_add_schema_migration_table_capacity(adapter_meta, command)
 
-    execute_ddl(updated_command)
+    # TODO FIXME added fake logger
+    { execute_ddl(updated_command), [{:info, "executed #{ command |> elem(0) }", []}]}
   end
 
   def execute_ddl({:create_if_not_exists, %Ecto.Migration.Table{} = table, field_clauses}) do
@@ -147,7 +159,7 @@ defmodule Ecto.Adapters.DynamoDB.Migration do
     %{"TableNames" => table_list} = Dynamo.list_tables |> ExAws.request!
 
     ecto_dynamo_log(:info, "#{inspect __MODULE__}.execute_ddl: :create_if_not_exists (table)")
-    
+
     if not Enum.member?(table_list, table_name) do
       ecto_dynamo_log(:info, "#{inspect __MODULE__}.execute_ddl: create_if_not_exist: creating table", %{table_name: table.name})
 
@@ -217,10 +229,10 @@ defmodule Ecto.Adapters.DynamoDB.Migration do
   end
 
   def execute_ddl({command, struct, _}), do:
-  raise ArgumentError, message: "#{inspect __MODULE__}.execute_ddl error: '" <> to_string(command) <> " #{extract_ecto_migration_type(inspect struct.__struct__)}' is not supported"
+    raise ArgumentError, message: "#{inspect __MODULE__}.execute_ddl error: '" <> to_string(command) <> " #{extract_ecto_migration_type(inspect struct.__struct__)}' is not supported"
 
   def execute_ddl({command, struct}), do:
-  raise ArgumentError, message: "#{inspect __MODULE__}.execute_ddl error: '" <> to_string(command) <> " #{extract_ecto_migration_type(inspect struct.__struct__)}' is not supported"
+    raise ArgumentError, message: "#{inspect __MODULE__}.execute_ddl error: '" <> to_string(command) <> " #{extract_ecto_migration_type(inspect struct.__struct__)}' is not supported"
 
   # We provide a configuration option for migration_table_capacity
   @spec maybe_add_schema_migration_table_capacity(Ecto.Adapter.Migration.adapter_meta, Ecto.Adapter.Migration.command) :: Ecto.Adapter.Migration.command
@@ -228,7 +240,7 @@ defmodule Ecto.Adapters.DynamoDB.Migration do
     migration_source = Keyword.get(adapter_meta.config, :migration_source, "schema_migrations")
 
     if to_string(table.name) == migration_source do
-      migration_table_capacity = Application.get_env(:ecto_adapters_dynamodb, :migration_table_capacity) || [1,1]
+      migration_table_capacity = Application.get_env(:ecto_adapters_dynamodb, :migration_table_capacity) || {1,1}
       updated_table_options = case table.options do
         nil  -> [provisioned_throughput: migration_table_capacity]
         opts -> Keyword.put(opts, :provisioned_throughput, migration_table_capacity)
@@ -347,9 +359,10 @@ defmodule Ecto.Adapters.DynamoDB.Migration do
     end
   end
 
+  @spec create_table(String.t, Ecto.Adapter.Migration.table_subcommand(), table_options()) :: :ok
   defp create_table(table_name, field_clauses, options) do
     {key_schema, key_definitions} = build_key_schema_and_definitions(table_name, field_clauses, options)
-    [read_capacity, write_capacity] = options[:provisioned_throughput] || [nil,nil]
+    {read_capacity, write_capacity} = options[:provisioned_throughput] || {1, 1}
     global_indexes = build_secondary_indexes(options[:global_indexes])
     local_indexes = build_secondary_indexes(options[:local_indexes])
     billing_mode = options[:billing_mode] || :provisioned
@@ -387,6 +400,7 @@ defmodule Ecto.Adapters.DynamoDB.Migration do
     end
   end
 
+  @spec build_key_schema_and_definitions(String.t, Ecto.Adapter.Migration.table_subcommand(), table_options()) :: Keyword.t
   defp build_key_schema_and_definitions(table_name, field_clauses, options) do
     secondary_index_atoms =
       (options[:global_indexes] || []) ++ (options[:local_indexes] || [])
@@ -465,7 +479,7 @@ defmodule Ecto.Adapters.DynamoDB.Migration do
 
   # Include provisioned_throughput only when it has been explicitly provided.
   defp maybe_add_throughput(index_map, nil), do: Map.merge(index_map, %{})
-  defp maybe_add_throughput(index_map, [read_capacity, write_capacity]), do:
+  defp maybe_add_throughput(index_map, {read_capacity, write_capacity}), do:
     Map.merge(index_map, %{provisioned_throughput: %{read_capacity_units: read_capacity, write_capacity_units: write_capacity}})
 
   defp convert_type(type) do

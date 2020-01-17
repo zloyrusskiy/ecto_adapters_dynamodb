@@ -156,6 +156,10 @@ defmodule Ecto.Adapters.DynamoDB do
   @impl Ecto.Adapter
   @spec loaders(primitive_type :: Ecto.Type.primitive(), ecto_type :: Ecto.Type.t()) ::
   [(term() -> {:ok, term()} | :error) | Ecto.Type.t()]
+  def loaders(:naive_datetime, str), do: [&NaiveDateTime.from_iso8601/1, str]
+  def loaders(:naive_datetime_usec, str), do: [&NaiveDateTime.from_iso8601/1, str]
+  def loaders(:utc_datetime, str), do: [&DateTime.from_iso8601/1, str]
+  def loaders(:utc_datetime_usec, str), do: [&DateTime.from_iso8601/1, str]
   def loaders(_primitive, type), do: [type]
 
 
@@ -168,10 +172,10 @@ defmodule Ecto.Adapters.DynamoDB do
   @impl Ecto.Adapter
   @spec dumpers(primitive_type :: Ecto.Type.primitive(), ecto_type :: Ecto.Type.t()) ::
   [(term() -> {:ok, term()} | :error) | Ecto.Type.t()]
-  def dumpers(:utc_datetime, %DateTime{} = datetime), do: [datetime, &datetime_to_iso_string/1]
-  def dumpers(:utc_datetime_usec, %DateTime{} = datetime), do: [datetime, &datetime_to_iso_string/1]
-  def dumpers(:naive_datetime, %NaiveDateTime{} = datetime), do: [datetime, &naive_datetime_to_iso_string/1]
-  def dumpers(:naive_datetime_usec, %NaiveDateTime{} = datetime), do: [datetime, &naive_datetime_to_iso_string/1]
+  def dumpers(:utc_datetime, datetime), do: [datetime, &datetime_to_iso_string/1]
+  def dumpers(:utc_datetime_usec, datetime), do: [datetime, &datetime_to_iso_string/1]
+  def dumpers(:naive_datetime, datetime), do: [datetime, &naive_datetime_to_iso_string/1]
+  def dumpers(:naive_datetime_usec, datetime), do: [datetime, &naive_datetime_to_iso_string/1]
   def dumpers(_primitive, type), do: [type]
 
   # Add UTC offset
@@ -258,7 +262,7 @@ defmodule Ecto.Adapters.DynamoDB do
 
     {table, model} = prepared.from.source # table and model are now nested under .from.source
     validate_where_clauses!(prepared)
-    lookup_fields = extract_lookup_fields(prepared.wheres, params, [])
+    lookup_fields = Ecto.Adapters.DynamoDB.QueryParser.extract_lookup_fields(prepared.wheres, params)
 
     limit_option = opts[:scan_limit]
     scan_limit = if is_integer(limit_option), do: [limit: limit_option], else: []
@@ -293,28 +297,16 @@ defmodule Ecto.Adapters.DynamoDB do
 
         if opts[:query_info_key], do: Ecto.Adapters.DynamoDB.QueryInfo.put(opts[:query_info_key], extract_query_info(result))
 
-        if result == %{} do
-          # Empty map means "not found"
-          {0, []}
-        else
-          sources =
-            model.__schema__(:fields)
-            |> Enum.into(%{}, fn f ->
-              {model.__schema__(:field_source, f), f}
-            end)
-
-          cond do
-            !result["Count"] and !result["Responses"] ->
-              decoded = decode_item(result["Item"], model, sources, prepared.select)
-              {1, [decoded]}
-
-            true ->
-              # batch_get_item returns "Responses" rather than "Items"
-              results_to_decode = if result["Items"], do: result["Items"], else: result["Responses"][table]
-
-              decoded = Enum.map(results_to_decode, &(decode_item(&1, model, sources, prepared.select)))
-              {length(decoded), decoded}
-          end
+        case result do
+          m when is_map(m) and map_size(m) == 0 -> {0, []}
+          %{"Items" => []} -> {0, []}
+          %{"Item" => item} ->{1, decode_item(item, nil, [], prepared.select)}
+          %{"Items" => items} ->
+            decoded = Enum.map(items, fn item -> decode_item(item, nil, [], prepared.select) end)
+            {length(decoded), decoded}
+          %{"Responses" => resp} ->
+            decoded = Enum.map(resp[table], fn item -> decode_item(item, nil, [], prepared.select) end)
+            {length(decoded), decoded}
         end
     end
   end
@@ -1043,195 +1035,17 @@ defmodule Ecto.Adapters.DynamoDB do
   defp validate_where_clause!(%BooleanExpr{expr: {:fragment, _, _}}), do: :ok
   defp validate_where_clause!(unsupported), do: error "unsupported where clause: #{inspect unsupported}"
 
-  # We are parsing a nested, recursive structure of the general type:
-  # %{:logical_op, list_of_clauses} | %{:conditional_op, field_and_value}
-  defp extract_lookup_fields([], _params, lookup_fields), do: lookup_fields
-  defp extract_lookup_fields([query | queries], params, lookup_fields) do
-    # A logical operator tuple does not always have a parent 'expr' key.
-    maybe_extract_from_expr = case query do
-      %BooleanExpr{expr: expr} -> expr
-      # TODO: could there be other cases?
-      _                        -> query
-    end
-
-    case maybe_extract_from_expr do
-      # A logical operator points to a list of conditionals
-      {op, _, [left, right]} when op in [:==, :<, :>, :<=, :>=, :in] ->
-        {field, value} = get_op_clause(left, right, params)
-        updated_lookup_fields =
-          case List.keyfind(lookup_fields, field, 0) do
-            # we assume the most ops we can apply to one field is two, otherwise this might throw an error
-            {field, {old_val, old_op}} ->
-              List.keyreplace(lookup_fields, field, 0, {field, {[value, old_val], [op, old_op]}})
-
-            _ -> [{field, {value, op}} | lookup_fields]
-          end
-        extract_lookup_fields(queries, params, updated_lookup_fields)
-
-      # Logical operator expressions have more than one op clause
-      # We are matching queries of the type: 'from(p in Person, where: p.email == "g@email.com" and p.first_name == "George")'
-      # But not of the type: 'from(p in Person, where: [email: "g@email.com", first_name: "George"])'
-      #
-      # A logical operator is a member of a list
-      {logical_op, _, clauses} when logical_op in [:and, :or] ->
-        deeper_lookup_fields = extract_lookup_fields(clauses, params, [])
-        extract_lookup_fields(queries, params, [{logical_op, deeper_lookup_fields} | lookup_fields])
-
-      {:fragment, _, raw_expr_mixed_list} ->
-        parsed_fragment = parse_raw_expr_mixed_list(raw_expr_mixed_list, params)
-        extract_lookup_fields(queries, params, [parsed_fragment | lookup_fields])
-
-      # We perform a post-query is_nil filter on indexed fields and have DynamoDB filter
-      # for nil non-indexed fields (although post-query nil-filters on (missing) indexed
-      # attributes could only find matches when the attributes are not the range part of
-      # a queried partition key (hash part) since those would not return the sought records).
-      {:is_nil, _, [arg]} ->
-        {{:., _, [_, field_name]}, _, _} = arg
-
-        # We give the nil value a string, "null", since it will be mapped as a DynamoDB attribute_expression_value
-        extract_lookup_fields(queries, params, [{to_string(field_name), {"null", :is_nil}} | lookup_fields])
-
-      _ -> extract_lookup_fields(queries, params, lookup_fields)
-    end
-  end
-
-  # Specific (as opposed to generalized) parsing for Ecto :fragment - the only use for it
-  # so far is 'between' which is the only way to query 'between' on an indexed field since
-  # those accept only single conditions.
-  #
-  # Example with values as strings: [raw: "", expr: {{:., [], [{:&, [], [0]}, :person_id]}, [], []}, raw: " between ", expr: "person:a", raw: " and ", expr: "person:f", raw: ""]
-  #
-  # Example with values as part of the string itself: [raw: "", expr: {{:., [], [{:&, [], [0]}, :person_id]}, [], []}, raw: " between person:a and person:f"]
-  #
-  # Example with values in params: [raw: "", expr: {{:., [], [{:&, [], [0]}, :person_id]}, [], []}, raw: " between ", expr: {:^, [], [0]}, raw: " and ", expr: {:^, [], [1]}, raw: ""]
-  #
-  defp parse_raw_expr_mixed_list(raw_expr_mixed_list, params) do
-    # group the expression into fields, values, and operators,
-    # only supporting the example with values in params
-    case raw_expr_mixed_list do
-      # between
-      [raw: _, expr: {{:., [], [{:&, [], [0]}, field_atom]}, [], []}, raw: between_str, expr: {:^, [], [idx1]}, raw: and_str, expr: {:^, [], [idx2]}, raw: _] ->
-        if not (Regex.match?(~r/^\s*between\s*and\s*$/i, between_str <> and_str)), do:
-          parse_raw_expr_mixed_list_error(raw_expr_mixed_list)
-        {to_string(field_atom), {[Enum.at(params, idx1), Enum.at(params, idx2)], :between}}
-
-      # begins_with
-      [raw: begins_with_str, expr: {{:., [], [{:&, [], [0]}, field_atom]}, [], []}, raw: comma_str, expr: {:^, [], [idx]}, raw: closing_parenthesis_str] ->
-        if not (Regex.match?(~r/^\s*begins_with\(\s*,\s*\)\s*$/i, begins_with_str <> comma_str <> closing_parenthesis_str)), do:
-          parse_raw_expr_mixed_list_error(raw_expr_mixed_list)
-        {to_string(field_atom), {Enum.at(params, idx), :begins_with}}
-
-      _ -> parse_raw_expr_mixed_list_error(raw_expr_mixed_list)
-    end
-  end
-
-  defp parse_raw_expr_mixed_list_error(raw_expr_mixed_list), do:
-    raise "#{inspect __MODULE__}.parse_raw_expr_mixed_list parse error. We currently only support the Ecto fragments of the form, 'where: fragment(\"? between ? and ?\", FIELD_AS_VARIABLE, VALUE_AS_VARIABLE, VALUE_AS_VARIABLE)'; and 'where: fragment(\"begins_with(?, ?)\", FIELD_AS_VARIABLE, VALUE_AS_VARIABLE)'. Received: #{inspect raw_expr_mixed_list}"
-
-  defp get_op_clause(left, right, params) do
-    field = left |> get_field |> Atom.to_string
-    value = get_value(right, params)
-    {field, value}
-  end
-
-  defp get_field({{:., _, [{:&, _, [0]}, field]}, _, []}), do: field
-  defp get_field(other_clause) do
-    error "Unsupported where clause, left hand side: #{other_clause}"
-  end
-
-  defp get_value({:^, _, [idx]}, params), do: Enum.at(params, idx)
-  # Handle queries with variable values, ex. Repo.all from i in Item, where: i.id in ^item_ids
-  # The last element of the tuple (first arg) will be a list with two numbers;
-  # the first number will be the number of attributes to be updated (in the event of an update_all query with a variable list)
-  # and the second will be a count of the number of elements in the variable list being queried. For example:
-  #
-  # query = from p in Person, where: p.id in ^ids
-  # TestRepo.update_all(query, set: [password: "cheese", last_name: "Smith"])
-  #
-  # assuming that ids contains 4 values, the last element would be [2, 4].
-  # Use this data to modify the params, which would otherwise include the values to be updated as well, which we don't want to query on.
-  defp get_value({:^, _, [num_update_terms, _num_query_terms]}, params), do: Enum.drop(params, num_update_terms)
-  # Handle .all(query) queries
-  defp get_value(other_clause, _params), do: other_clause
-
   defp error(msg) do
     raise ArgumentError, message: msg
   end
 
+  defp decode_item(item, _, _, select) do
+    decoded = item |> Enum.map( fn {k,v} -> {String.to_atom(k), ExAws.Dynamo.Decoder.decode(v) } end)
+    fields = Ecto.Adapters.DynamoDB.QueryParser.extract_select_fields(select)
 
-  defp extract_select_fields(%Ecto.Query.SelectExpr{expr: expr} = _) do
-    case expr do
-      {_, _, [0]} ->
-        []
-
-      {{:., _, [{_, _, _}, field]}, _, _} ->
-        [field]
-
-      {:{}, _, clauses} ->
-        for {{_, _, [{_, _, _}, field]}, _, _} <- clauses, do: field
-    end
+    Enum.map(fields, fn key -> Keyword.get(decoded, key) end)
   end
 
-  # Decodes maps and datetime, seemingly unhandled by ExAws Dynamo decoder
-  # (timestamps() corresponds with :naive_datetime)
-  defp custom_decode(item, model, select) do
-    selected_fields = extract_select_fields(select)
-
-    case selected_fields do
-      [] ->
-        [Enum.reduce(model.__schema__(:fields), item, fn (field, acc) ->
-          Map.update!(acc, field, fn val -> decode_type(model.__schema__(:type, field), val) end)
-        end)]
-      fields ->
-        for field <- fields, do: decode_type(model.__schema__(:type, field), Map.get(item, field))
-    end
-  end
-
-  defp decode_item(item, model, sources, select) do
-    item = Enum.reduce(item, %{}, fn {k, v}, acc ->
-      key = to_string(Map.get(sources, String.to_atom(k)))
-      Map.put(acc, key, v)
-    end)
-
-    ecto_item = %{"Item" => item} |> Dynamo.decode_item(as: model)
-
-    Enum.map(select.fields, fn {{_, _, [_, key]}, _, _} -> Map.get(ecto_item, key) end)
-  end
-
-  # This is used slightly differently
-  # when handling select in custom_decode/2
-  defp decode_type(type, val) do
-    if is_nil val do
-      val
-    else
-      case type do
-        :utc_datetime ->
-          {:ok, dt, _offset} = DateTime.from_iso8601(val)
-          dt
-
-        :naive_datetime ->
-          NaiveDateTime.from_iso8601!(val)
-
-        {:embed, _} ->
-          decode_embed(type, val)
-
-        t when t in [Ecto.Adapters.DynamoDB.DynamoDBSet, MapSet] ->
-          MapSet.new(val)
-
-        _ -> val
-      end
-    end
-  end
-
-  defp decode_embed(type, val) do
-    case Ecto.Adapters.SQL.load_embed(type, val) do
-      {:ok, decoded_value} ->
-        decoded_value
-      :error ->
-        ecto_dynamo_log(:info, "#{inspect __MODULE__}.decode_embed: failed to decode embedded value: #{inspect val}")
-        nil
-    end
-  end
   # We found one instance where DynamoDB's error message could
   # be more instructive - when trying to set an indexed field to something
   # other than a string or number - so we're adding a more helpful message.
