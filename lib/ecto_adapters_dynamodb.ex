@@ -5,26 +5,24 @@ defmodule Ecto.Adapters.DynamoDB do
   Currently for a fairly limited subset of Ecto, enough for basic operations.
   """
 
-  #NOTE: in ecto, Repo.get[!] ends up calling:
-    #-> querable.get
-    #-> queryable.one
-    #-> queryable.all
-    #-> queryable.execute
-    #-> adapter.execute (possibly prepare somewhere in their too? trace.)
-
+  # NOTE: in ecto, Repo.get[!] ends up calling:
+  # -> querable.get
+  # -> queryable.one
+  # -> queryable.all
+  # -> queryable.execute
+  # -> adapter.execute (possibly prepare somewhere in their too? trace.)
 
   @behaviour Ecto.Adapter
   @behaviour Ecto.Adapter.Schema
   @behaviour Ecto.Adapter.Queryable
-  #@behaviour Ecto.Adapter.Storage
+  # @behaviour Ecto.Adapter.Storage
   @behaviour Ecto.Adapter.Migration
 
-  @typep dynamo_isodate :: String.t
+  @typep dynamo_isodate :: String.t()
 
   @impl Ecto.Adapter
   defmacro __before_compile__(_env) do
     # Nothing to see here, yet...
-
   end
 
   use Bitwise, only_operators: true
@@ -39,17 +37,20 @@ defmodule Ecto.Adapters.DynamoDB do
   #
   # in init/1 below
   def start_link({_module, config}) do
-    ecto_dynamo_log(:debug, "#{inspect __MODULE__}.start_link", %{"#{inspect __MODULE__}.start_link-params" => %{config: config}})
-    Agent.start_link fn -> [] end
+    ecto_dynamo_log(:debug, "#{inspect(__MODULE__)}.start_link", %{
+      "#{inspect(__MODULE__)}.start_link-params" => %{config: config}
+    })
+
+    Agent.start_link(fn -> [] end)
   end
 
   @impl Ecto.Adapter
-  @spec init(config :: Keyword.t()) :: {:ok, :supervisor.child_spec(), Ecto.Adapter.adapter_meta()}
+  @spec init(config :: Keyword.t()) ::
+          {:ok, :supervisor.child_spec(), Ecto.Adapter.adapter_meta()}
   def init(config) do
     child = %{
       id: __MODULE__,
-      start: {__MODULE__, :start_link,
-               [{__MODULE__, config}]}
+      start: {__MODULE__, :start_link, [{__MODULE__, config}]}
     }
 
     meta = %{
@@ -58,46 +59,48 @@ defmodule Ecto.Adapters.DynamoDB do
       config: config
     }
 
-    ecto_dynamo_log(:debug, "#{inspect __MODULE__}.init", %{"#{inspect __MODULE__}.init-params" => %{config: config}})
+    ecto_dynamo_log(:debug, "#{inspect(__MODULE__)}.init", %{
+      "#{inspect(__MODULE__)}.init-params" => %{config: config}
+    })
 
     {:ok, child, meta}
   end
 
-    # @doc """
-    # Returns the childspec that starts the adapter process.
-    # """
-    # def child_spec(repo, opts) do
-    #   # TODO: need something here...
-    #   # * Pull dynamo db connection options from config
-    #   # * Start dynamo connector/aws libraries
-    #   # we'll return our own start_link for now, but I don't think we actually need
-    #   # an app here, we only need to ensure that our dependencies such as aws libs are started.
-    #   #
+  # @doc """
+  # Returns the childspec that starts the adapter process.
+  # """
+  # def child_spec(repo, opts) do
+  #   # TODO: need something here...
+  #   # * Pull dynamo db connection options from config
+  #   # * Start dynamo connector/aws libraries
+  #   # we'll return our own start_link for now, but I don't think we actually need
+  #   # an app here, we only need to ensure that our dependencies such as aws libs are started.
+  #   #
 
-    #  [:debug_requests, :access_key_id, :secret_access_key, :region, :dynamodb] |> Enum.map(fn key ->
-    #    if opts[key] != nil, do: Application.put_env(:ex_aws, key, opts[key])
-    #  end)
+  #  [:debug_requests, :access_key_id, :secret_access_key, :region, :dynamodb] |> Enum.map(fn key ->
+  #    if opts[key] != nil, do: Application.put_env(:ex_aws, key, opts[key])
+  #  end)
 
-    #   import Supervisor.Spec
-    #   child_spec = worker(__MODULE__, [repo, opts])
+  #   import Supervisor.Spec
+  #   child_spec = worker(__MODULE__, [repo, opts])
 
-    #   ecto_dynamo_log(:debug, "#{inspect __MODULE__}.child_spec", %{"#{inspect __MODULE__}.child_spec-params" => %{repo: repo, child_spec: child_spec, opts: opts}})
+  #   ecto_dynamo_log(:debug, "#{inspect __MODULE__}.child_spec", %{"#{inspect __MODULE__}.child_spec-params" => %{repo: repo, child_spec: child_spec, opts: opts}})
 
-    #   child_spec
-    # end
-
+  #   child_spec
+  # end
 
   @doc """
   Ensure all applications necessary to run the adapter are started.
   """
   @impl Ecto.Adapter
   @spec ensure_all_started(config :: Keyword.t(), type :: Application.restart_type()) ::
-  {:ok, [atom()]} | {:error, atom()}
+          {:ok, [atom()]} | {:error, atom()}
   def ensure_all_started(repo, type) do
-    ecto_dynamo_log(:debug, "#{inspect __MODULE__}.ensure_all_started", %{"#{inspect __MODULE__}.ensure_all_started-params" => %{type: type, repo: repo}})
+    ecto_dynamo_log(:debug, "#{inspect(__MODULE__)}.ensure_all_started", %{
+      "#{inspect(__MODULE__)}.ensure_all_started-params" => %{type: type, repo: repo}
+    })
 
-    with {:ok, _} = Application.ensure_all_started(:ecto_adapters_dynamodb)
-    do
+    with {:ok, _} = Application.ensure_all_started(:ecto_adapters_dynamodb) do
       {:ok, [repo]}
     end
   end
@@ -107,25 +110,34 @@ defmodule Ecto.Adapters.DynamoDB do
   def supports_ddl_transaction?, do: false
 
   @impl Ecto.Adapter.Migration
-  @spec execute_ddl(Ecto.Adapter.Migration.adapter_meta(), Ecto.Adapter.Migration.command(), options :: Keyword.t()) ::
-  {:ok, [{Logger.level(), Logger.message(), Logger.metadata()}]}
+  @spec execute_ddl(
+          Ecto.Adapter.Migration.adapter_meta(),
+          Ecto.Adapter.Migration.command(),
+          options :: Keyword.t()
+        ) ::
+          {:ok, [{Logger.level(), Logger.message(), Logger.metadata()}]}
   def execute_ddl(adapter_meta, command, options) do
     Ecto.Adapters.DynamoDB.Migration.execute_ddl(adapter_meta, command, options)
   end
 
   @impl Ecto.Adapter.Migration
-  @spec lock_for_migrations(Ecto.Adapter.Migration.adapter_meta(), Ecto.Query.t(), options :: Keyword.t(), fun) ::
-  result when fun: (Ecto.Query.t() -> result), result: var
+  @spec lock_for_migrations(
+          Ecto.Adapter.Migration.adapter_meta(),
+          Ecto.Query.t(),
+          options :: Keyword.t(),
+          fun
+        ) ::
+          result
+        when fun: (Ecto.Query.t() -> result), result: var
   def lock_for_migrations(_adapter_meta, query, _options, callback) do
     callback.(query)
   end
 
-# moved to transaction.ex in ecto 2.1.4
-#  def in_transaction?(_repo), do: false
-#
-#  def rollback(_repo, _value), do:
-#    raise BadFunctionError, message: "#{inspect __MODULE__} does not support transactions."
-
+  # moved to transaction.ex in ecto 2.1.4
+  #  def in_transaction?(_repo), do: false
+  #
+  #  def rollback(_repo, _value), do:
+  #    raise BadFunctionError, message: "#{inspect __MODULE__} does not support transactions."
 
   @doc """
   Called to autogenerate a value for id/embed_id/binary_id.
@@ -140,7 +152,8 @@ defmodule Ecto.Adapters.DynamoDB do
   For the Ecto type, `:binary_id`, the adapter autogenerates a string, using `Ecto.UUID.generate()`
   """
 
-  @max_id ((1 <<< 128) - 1) # biggest possible int in 128 bits
+  # biggest possible int in 128 bits
+  @max_id (1 <<< 128) - 1
   @impl Ecto.Adapter.Schema
   @spec autogenerate(field_type :: :id | :binary_id | :embed_id) :: term() | nil
   def autogenerate(:id), do: Enum.random(1..@max_id)
@@ -155,14 +168,12 @@ defmodule Ecto.Adapters.DynamoDB do
   """
   @impl Ecto.Adapter
   @spec loaders(primitive_type :: Ecto.Type.primitive(), ecto_type :: Ecto.Type.t()) ::
-  [(term() -> {:ok, term()} | :error) | Ecto.Type.t()]
+          [(term() -> {:ok, term()} | :error) | Ecto.Type.t()]
   def loaders(:naive_datetime, str), do: [&NaiveDateTime.from_iso8601/1, str]
   def loaders(:naive_datetime_usec, str), do: [&NaiveDateTime.from_iso8601/1, str]
   def loaders(:utc_datetime, str), do: [&DateTime.from_iso8601/1, str]
   def loaders(:utc_datetime_usec, str), do: [&DateTime.from_iso8601/1, str]
   def loaders(_primitive, type), do: [type]
-
-
 
   @doc """
   Returns the dumpers for a given type.
@@ -171,7 +182,7 @@ defmodule Ecto.Adapters.DynamoDB do
   """
   @impl Ecto.Adapter
   @spec dumpers(primitive_type :: Ecto.Type.primitive(), ecto_type :: Ecto.Type.t()) ::
-  [(term() -> {:ok, term()} | :error) | Ecto.Type.t()]
+          [(term() -> {:ok, term()} | :error) | Ecto.Type.t()]
   def dumpers(:utc_datetime, datetime), do: [datetime, &datetime_to_iso_string/1]
   def dumpers(:utc_datetime_usec, datetime), do: [datetime, &datetime_to_iso_string/1]
   def dumpers(:naive_datetime, datetime), do: [datetime, &naive_datetime_to_iso_string/1]
@@ -181,14 +192,14 @@ defmodule Ecto.Adapters.DynamoDB do
   # Add UTC offset
   # https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/DynamoDBMapper.DataTypes.html
   # Date (as ISO_8601 millisecond-precision string, shifted to UTC)
-  @spec datetime_to_iso_string(DateTime.t) :: {:ok, dynamo_isodate()}
+  @spec datetime_to_iso_string(DateTime.t()) :: {:ok, dynamo_isodate()}
   defp datetime_to_iso_string(datetime) do
-    {:ok, (datetime |> DateTime.truncate(:millisecond) |> DateTime.to_iso8601) <> "Z"}
+    {:ok, (datetime |> DateTime.truncate(:millisecond) |> DateTime.to_iso8601()) <> "Z"}
   end
 
-  @spec datetime_to_iso_string(NaiveDateTime.t) :: {:ok, dynamo_isodate()}
+  @spec datetime_to_iso_string(NaiveDateTime.t()) :: {:ok, dynamo_isodate()}
   defp naive_datetime_to_iso_string(datetime) do
-    {:ok, (datetime |> NaiveDateTime.truncate(:millisecond) |> NaiveDateTime.to_iso8601) <> "Z"}
+    {:ok, (datetime |> NaiveDateTime.truncate(:millisecond) |> NaiveDateTime.to_iso8601()) <> "Z"}
   end
 
   @doc """
@@ -196,35 +207,40 @@ defmodule Ecto.Adapters.DynamoDB do
 
   The returned result is given to `execute/6`.
   """
-  #@callback prepare(atom :: :all | :update_all | :delete_all, query :: Ecto.Query.t) ::
+  # @callback prepare(atom :: :all | :update_all | :delete_all, query :: Ecto.Query.t) ::
   #          {:cache, prepared} | {:nocache, prepared}
   @impl Ecto.Adapter.Queryable
   @spec prepare(atom :: :all | :update_all | :delete_all, query :: Ecto.Query.t()) ::
-  {:cache, Ecto.Adapter.Queryable.prepared()} | {:nocache, Ecto.Adapter.Queryable.prepared()}
+          {:cache, Ecto.Adapter.Queryable.prepared()}
+          | {:nocache, Ecto.Adapter.Queryable.prepared()}
   def prepare(:all, query) do
     # 'preparing' is more a SQL concept - Do we really need to do anything here or just pass the params through?
-    ecto_dynamo_log(:debug, "#{inspect __MODULE__}.prepare: :all", %{"#{inspect __MODULE__}.prepare-params" => %{query: inspect(query, structs: false)}})
- 
+    ecto_dynamo_log(:debug, "#{inspect(__MODULE__)}.prepare: :all", %{
+      "#{inspect(__MODULE__)}.prepare-params" => %{query: inspect(query, structs: false)}
+    })
+
     {:nocache, {:all, query}}
   end
 
-
   def prepare(:update_all, query) do
-    ecto_dynamo_log(:debug, "#{inspect __MODULE__}.prepare: :update_all", %{"#{inspect __MODULE__}.prepare-params" => %{query: inspect(query, structs: false)}})
+    ecto_dynamo_log(:debug, "#{inspect(__MODULE__)}.prepare: :update_all", %{
+      "#{inspect(__MODULE__)}.prepare-params" => %{query: inspect(query, structs: false)}
+    })
 
     {:nocache, {:update_all, query}}
   end
+
   # do: {:cache, {System.unique_integer([:positive]), @conn.update_all(query)}}
 
-
   def prepare(:delete_all, query) do
-    ecto_dynamo_log(:debug, "#{inspect __MODULE__}.prepare: :delete_all", %{"#{inspect __MODULE__}.prepare-params" => %{query: inspect(query, structs: false)}})
+    ecto_dynamo_log(:debug, "#{inspect(__MODULE__)}.prepare: :delete_all", %{
+      "#{inspect(__MODULE__)}.prepare-params" => %{query: inspect(query, structs: false)}
+    })
 
     {:nocache, {:delete_all, query}}
   end
+
   # do: {:cache, {System.unique_integer([:positive]), @conn.delete_all(query)}}
-
-
 
   @doc """
   Executes a previously prepared query.
@@ -241,28 +257,38 @@ defmodule Ecto.Adapters.DynamoDB do
   expected Ecto type. The `process` function will be nil if no
   result set is expected from the query.
   """
-  #@callback execute(repo, query_meta, query, params :: list(), process | nil, options) :: result when
+  # @callback execute(repo, query_meta, query, params :: list(), process | nil, options) :: result when
   #          result: {integer, [[term]] | nil} | no_return,
   #          query: {:nocache, prepared} |
   #                 {:cached, (prepared -> :ok), cached} |
   #                 {:cache, (cached -> :ok), prepared}
 
-
   # the 5th arg, process, has been dropped
   @impl Ecto.Adapter.Queryable
   @spec execute(
-    Ecto.Adapter.Queryable.adapter_meta(),
-    Ecto.Adapter.Queryable.query_meta(),
-    Ecto.Adapter.Queryable.query_cache(),
-    params :: list(),
-    Ecto.Adapter.Queryable.options()
-  ) :: {integer(), [[term()]] | nil}
+          Ecto.Adapter.Queryable.adapter_meta(),
+          Ecto.Adapter.Queryable.query_meta(),
+          Ecto.Adapter.Queryable.query_cache(),
+          params :: list(),
+          Ecto.Adapter.Queryable.options()
+        ) :: {integer(), [[term()]] | nil}
   def execute(adapter_meta, query_meta, {:nocache, {func, prepared}}, params, opts) do
-    ecto_dynamo_log(:debug, "#{inspect __MODULE__}.execute", %{"#{inspect __MODULE__}.execute-params" => %{adapter_meta: adapter_meta, query_meta: query_meta, prepared: prepared, params: params, opts: opts}})
+    ecto_dynamo_log(:debug, "#{inspect(__MODULE__)}.execute", %{
+      "#{inspect(__MODULE__)}.execute-params" => %{
+        adapter_meta: adapter_meta,
+        query_meta: query_meta,
+        prepared: prepared,
+        params: params,
+        opts: opts
+      }
+    })
 
-    {table, model} = prepared.from.source # table and model are now nested under .from.source
+    # table and model are now nested under .from.source
+    {table, _model} = prepared.from.source
     validate_where_clauses!(prepared)
-    lookup_fields = Ecto.Adapters.DynamoDB.QueryParser.extract_lookup_fields(prepared.wheres, params)
+
+    lookup_fields =
+      Ecto.Adapters.DynamoDB.QueryParser.extract_lookup_fields(prepared.wheres, params)
 
     limit_option = opts[:scan_limit]
     scan_limit = if is_integer(limit_option), do: [limit: limit_option], else: []
@@ -271,15 +297,28 @@ defmodule Ecto.Adapters.DynamoDB do
     # from line 34, file "deps/ecto/lib/ecto/migration/schema_migration.ex"
     migration_source = Keyword.get(adapter_meta.config, :migration_source, "schema_migrations")
 
-    updated_opts = if table == migration_source do
-      ecto_dynamo_log(:debug, "#{inspect __MODULE__}.execute: table name corresponds with migration source: #{inspect migration_source}. Setting options for recursive scan.", %{})
+    updated_opts =
+      if table == migration_source do
+        ecto_dynamo_log(
+          :debug,
+          "#{inspect(__MODULE__)}.execute: table name corresponds with migration source: #{
+            inspect(migration_source)
+          }. Setting options for recursive scan.",
+          %{}
+        )
 
-      Keyword.drop(opts, [:timeout, :log]) ++ [recursive: true]
-    else
-      Keyword.drop(opts, [:scan_limit, :limit]) ++ scan_limit
-    end
+        Keyword.drop(opts, [:timeout, :log]) ++ [recursive: true]
+      else
+        Keyword.drop(opts, [:scan_limit, :limit]) ++ scan_limit
+      end
 
-    ecto_dynamo_log(:debug, "#{inspect __MODULE__}.execute: local variables", %{"#{inspect __MODULE__}.execute-vars" => %{table: table, lookup_fields: lookup_fields, scan_limit: scan_limit}})
+    ecto_dynamo_log(:debug, "#{inspect(__MODULE__)}.execute: local variables", %{
+      "#{inspect(__MODULE__)}.execute-vars" => %{
+        table: table,
+        lookup_fields: lookup_fields,
+        scan_limit: scan_limit
+      }
+    })
 
     case func do
       :delete_all ->
@@ -289,23 +328,45 @@ defmodule Ecto.Adapters.DynamoDB do
         update_all(table, lookup_fields, updated_opts, prepared.updates, params)
 
       :all ->
-        ecto_dynamo_log(:info, "#{inspect __MODULE__}.execute: :all", %{"#{inspect __MODULE__}.execute-all-vars" => %{table: table, lookup_fields: lookup_fields, updated_opts: updated_opts}})
+        ecto_dynamo_log(:info, "#{inspect(__MODULE__)}.execute: :all", %{
+          "#{inspect(__MODULE__)}.execute-all-vars" => %{
+            table: table,
+            lookup_fields: lookup_fields,
+            updated_opts: updated_opts
+          }
+        })
 
         result = Ecto.Adapters.DynamoDB.Query.get_item(table, lookup_fields, updated_opts)
 
-        ecto_dynamo_log(:debug, "#{inspect __MODULE__}.execute: all: result", %{"#{inspect __MODULE__}.execute-all-result" => inspect result})
+        ecto_dynamo_log(:debug, "#{inspect(__MODULE__)}.execute: all: result", %{
+          "#{inspect(__MODULE__)}.execute-all-result" => inspect(result)
+        })
 
-        if opts[:query_info_key], do: Ecto.Adapters.DynamoDB.QueryInfo.put(opts[:query_info_key], extract_query_info(result))
+        if opts[:query_info_key],
+          do:
+            Ecto.Adapters.DynamoDB.QueryInfo.put(
+              opts[:query_info_key],
+              extract_query_info(result)
+            )
 
         case result do
-          m when is_map(m) and map_size(m) == 0 -> {0, []}
-          %{"Items" => []} -> {0, []}
-          %{"Item" => item} ->{1, decode_item(item, nil, [], prepared.select)}
+          m when is_map(m) and map_size(m) == 0 ->
+            {0, []}
+
+          %{"Items" => []} ->
+            {0, []}
+
+          %{"Item" => item} ->
+            {1, decode_item(item, nil, [], prepared.select)}
+
           %{"Items" => items} ->
             decoded = Enum.map(items, fn item -> decode_item(item, nil, [], prepared.select) end)
             {length(decoded), decoded}
+
           %{"Responses" => resp} ->
-            decoded = Enum.map(resp[table], fn item -> decode_item(item, nil, [], prepared.select) end)
+            decoded =
+              Enum.map(resp[table], fn item -> decode_item(item, nil, [], prepared.select) end)
+
             {length(decoded), decoded}
         end
     end
@@ -313,13 +374,21 @@ defmodule Ecto.Adapters.DynamoDB do
 
   # delete_all allows for the recursive option, scanning through multiple pages
   defp delete_all(table, lookup_fields, opts) do
-    ecto_dynamo_log(:info, "#{inspect __MODULE__}.delete_all", %{"#{inspect __MODULE__}.delete_all-params" => %{table: table, lookup_fields: lookup_fields, opts: opts}})
+    ecto_dynamo_log(:info, "#{inspect(__MODULE__)}.delete_all", %{
+      "#{inspect(__MODULE__)}.delete_all-params" => %{
+        table: table,
+        lookup_fields: lookup_fields,
+        opts: opts
+      }
+    })
 
     # select only the key
     {:primary, key_list} = Ecto.Adapters.DynamoDB.Info.primary_key!(table)
     scan_or_query = Ecto.Adapters.DynamoDB.Query.scan_or_query?(table, lookup_fields)
     recursive = Ecto.Adapters.DynamoDB.Query.parse_recursive_option(scan_or_query, opts)
-    updated_opts = prepare_recursive_opts(opts ++ [projection_expression: Enum.join(key_list, ", ")])
+
+    updated_opts =
+      prepare_recursive_opts(opts ++ [projection_expression: Enum.join(key_list, ", ")])
 
     delete_all_recursive(table, lookup_fields, updated_opts, recursive, %{}, 0)
   end
@@ -328,80 +397,128 @@ defmodule Ecto.Adapters.DynamoDB do
     # query the table for which records to delete
     fetch_result = Ecto.Adapters.DynamoDB.Query.get_item(table, lookup_fields, opts)
 
-    ecto_dynamo_log(:debug, "#{inspect __MODULE__}.delete_all_recursive: fetch_result", %{"#{inspect __MODULE__}.delete_all_recursive-fetch_result" => inspect fetch_result})
+    ecto_dynamo_log(:debug, "#{inspect(__MODULE__)}.delete_all_recursive: fetch_result", %{
+      "#{inspect(__MODULE__)}.delete_all_recursive-fetch_result" => inspect(fetch_result)
+    })
 
-    items = case fetch_result do
-      %{"Items" => fetch_items}   -> fetch_items
-      %{"Item" => item}           -> [item]
-      %{"Responses" => table_map} -> table_map[table]
-      _                           -> []
-    end
+    items =
+      case fetch_result do
+        %{"Items" => fetch_items} -> fetch_items
+        %{"Item" => item} -> [item]
+        %{"Responses" => table_map} -> table_map[table]
+        _ -> []
+      end
 
-    prepared_data = for key_list <- Enum.map(items, &Map.to_list/1) do
-      key_map = for {key, val_map} <- key_list, into: %{}, do: {key, Dynamo.Decoder.decode(val_map)}
-      [delete_request: [key: key_map]]
-    end
+    prepared_data =
+      for key_list <- Enum.map(items, &Map.to_list/1) do
+        key_map =
+          for {key, val_map} <- key_list, into: %{}, do: {key, Dynamo.Decoder.decode(val_map)}
 
-    unprocessed_items = if prepared_data != [] do
-      batch_delete(table, prepared_data)
-    else
-      %{}
-    end
+        [delete_request: [key: key_map]]
+      end
+
+    unprocessed_items =
+      if prepared_data != [] do
+        batch_delete(table, prepared_data)
+      else
+        %{}
+      end
 
     num_processed =
-      length(prepared_data) - if !unprocessed_items[table], do: 0, else: length(unprocessed_items[table])
+      length(prepared_data) -
+        if !unprocessed_items[table], do: 0, else: length(unprocessed_items[table])
 
-    updated_query_info = Enum.reduce(fetch_result, query_info, fn({key, val}, acc) ->
-      case key do
-        "Count" -> Map.update(acc, key, val, fn x -> x + val end)
-        "ScannedCount" -> Map.update(acc, key, val, fn x -> x + val end)
-        "LastEvaluatedKey" -> Map.update(acc, key, val, fn _ -> fetch_result["LastEvaluatedKey"] end)
-        _ -> acc
-      end
-    end) |> Map.update("UnprocessedItems", unprocessed_items, fn map -> if map == %{}, do: %{}, else: %{table => map[table] ++ unprocessed_items[table]} end)
+    updated_query_info =
+      Enum.reduce(fetch_result, query_info, fn {key, val}, acc ->
+        case key do
+          "Count" ->
+            Map.update(acc, key, val, fn x -> x + val end)
+
+          "ScannedCount" ->
+            Map.update(acc, key, val, fn x -> x + val end)
+
+          "LastEvaluatedKey" ->
+            Map.update(acc, key, val, fn _ -> fetch_result["LastEvaluatedKey"] end)
+
+          _ ->
+            acc
+        end
+      end)
+      |> Map.update("UnprocessedItems", unprocessed_items, fn map ->
+        if map == %{}, do: %{}, else: %{table => map[table] ++ unprocessed_items[table]}
+      end)
 
     updated_recursive = Ecto.Adapters.DynamoDB.Query.update_recursive_option(recursive)
 
     if fetch_result["LastEvaluatedKey"] != nil and updated_recursive.continue do
-        opts_with_offset = opts ++ [exclusive_start_key: fetch_result["LastEvaluatedKey"]]
-        delete_all_recursive(table, lookup_fields, opts_with_offset, updated_recursive.new_value, updated_query_info, total_processed + num_processed)
+      opts_with_offset = opts ++ [exclusive_start_key: fetch_result["LastEvaluatedKey"]]
+
+      delete_all_recursive(
+        table,
+        lookup_fields,
+        opts_with_offset,
+        updated_recursive.new_value,
+        updated_query_info,
+        total_processed + num_processed
+      )
     else
       # We're not retrying unprocessed items yet, but we are providing the relevant info in the QueryInfo agent if :query_info_key is supplied
-      if opts[:query_info_key], do: Ecto.Adapters.DynamoDB.QueryInfo.put(opts[:query_info_key], updated_query_info)
+      if opts[:query_info_key],
+        do: Ecto.Adapters.DynamoDB.QueryInfo.put(opts[:query_info_key], updated_query_info)
+
       {num_processed + total_processed, nil}
     end
   end
 
   # returns unprocessed_items
   defp batch_delete(table, prepared_data) do
-    batch_write_attempt = Dynamo.batch_write_item(%{table => prepared_data}) |> ExAws.request |> handle_error!(%{table: table, records: []})
+    batch_write_attempt =
+      Dynamo.batch_write_item(%{table => prepared_data})
+      |> ExAws.request()
+      |> handle_error!(%{table: table, records: []})
 
     batch_write_attempt["UnprocessedItems"]
   end
 
   defp update_all(table, lookup_fields, opts, updates, params) do
-    ecto_dynamo_log(:info, "#{inspect __MODULE__}.update_all", %{"#{inspect __MODULE__}.update_all-params" => %{table: table, lookup_fields: lookup_fields, opts: opts}})
+    ecto_dynamo_log(:info, "#{inspect(__MODULE__)}.update_all", %{
+      "#{inspect(__MODULE__)}.update_all-params" => %{
+        table: table,
+        lookup_fields: lookup_fields,
+        opts: opts
+      }
+    })
 
     scan_or_query = Ecto.Adapters.DynamoDB.Query.scan_or_query?(table, lookup_fields)
     recursive = Ecto.Adapters.DynamoDB.Query.parse_recursive_option(scan_or_query, opts)
 
     key_list = Ecto.Adapters.DynamoDB.Info.primary_key!(table)
 
-    ecto_dynamo_log(:debug, "#{inspect __MODULE__}.update_all: key_list", %{"#{inspect __MODULE__}.update_all-key_list" => inspect key_list})
+    ecto_dynamo_log(:debug, "#{inspect(__MODULE__)}.update_all: key_list", %{
+      "#{inspect(__MODULE__)}.update_all-key_list" => inspect(key_list)
+    })
 
     # The remove statement must be constructed after finding pull-indexes, but it
     # also includes possibly removing nil fields, and since we have one handler for
     # both set and remove, we call it during the batch update process
-    {update_expression, update_fields_sans_set_remove, set_remove_fields} = construct_update_expression(updates, params, opts)
+    {update_expression, update_fields_sans_set_remove, set_remove_fields} =
+      construct_update_expression(updates, params, opts)
 
-    ecto_dynamo_log(:info, "#{inspect __MODULE__}.update_all: update fields", %{"#{inspect __MODULE__}.update_all-update_fields" => %{update_fields_sans_set_remove: inspect(update_fields_sans_set_remove), set_remove_fields: inspect(set_remove_fields)}})
+    ecto_dynamo_log(:info, "#{inspect(__MODULE__)}.update_all: update fields", %{
+      "#{inspect(__MODULE__)}.update_all-update_fields" => %{
+        update_fields_sans_set_remove: inspect(update_fields_sans_set_remove),
+        set_remove_fields: inspect(set_remove_fields)
+      }
+    })
 
     attribute_names = construct_expression_attribute_names(update_fields_sans_set_remove)
     attribute_values = construct_expression_attribute_values(update_fields_sans_set_remove, opts)
 
-    base_update_options = [expression_attribute_names: attribute_names,
-                           update_expression: update_expression,
-                           return_values: :all_new]
+    base_update_options = [
+      expression_attribute_names: attribute_names,
+      update_expression: update_expression,
+      return_values: :all_new
+    ]
 
     updated_opts = prepare_recursive_opts(opts)
     update_options = maybe_add_attribute_values(base_update_options, attribute_values)
@@ -414,80 +531,139 @@ defmodule Ecto.Adapters.DynamoDB do
       if pull_actions_without_index do
         {update_options, set_remove_fields}
       else
-        merged_pull_indexes = Keyword.merge(set_remove_fields[:pull], maybe_list(opts[:pull_indexes]))
-        opts_with_pull_indexes = Keyword.update(opts, :pull_indexes, merged_pull_indexes, fn _ -> merged_pull_indexes end)
-        {update_batch_update_options(update_options, set_remove_fields, opts_with_pull_indexes), []}
+        merged_pull_indexes =
+          Keyword.merge(set_remove_fields[:pull], maybe_list(opts[:pull_indexes]))
+
+        opts_with_pull_indexes =
+          Keyword.update(opts, :pull_indexes, merged_pull_indexes, fn _ -> merged_pull_indexes end)
+
+        {update_batch_update_options(update_options, set_remove_fields, opts_with_pull_indexes),
+         []}
       end
 
-    update_all_recursive(table, lookup_fields, updated_opts, new_update_options, key_list, new_set_remove_fields, recursive, %{}, 0)
+    update_all_recursive(
+      table,
+      lookup_fields,
+      updated_opts,
+      new_update_options,
+      key_list,
+      new_set_remove_fields,
+      recursive,
+      %{},
+      0
+    )
   end
 
-  defp update_all_recursive(table, lookup_fields, opts, update_options, key_list, set_remove_fields, recursive, query_info, total_updated) do
+  defp update_all_recursive(
+         table,
+         lookup_fields,
+         opts,
+         update_options,
+         key_list,
+         set_remove_fields,
+         recursive,
+         query_info,
+         total_updated
+       ) do
     fetch_result = Ecto.Adapters.DynamoDB.Query.get_item(table, lookup_fields, opts)
 
-    ecto_dynamo_log(:debug, "#{inspect __MODULE__}.update_all_recursive: fetch_result", %{"#{inspect __MODULE__}.update_all_recursive-fetch_result" => inspect(fetch_result)})
+    ecto_dynamo_log(:debug, "#{inspect(__MODULE__)}.update_all_recursive: fetch_result", %{
+      "#{inspect(__MODULE__)}.update_all_recursive-fetch_result" => inspect(fetch_result)
+    })
 
-    updated_query_info = case fetch_result do
-      %{"Count" => last_count, "ScannedCount" => last_scanned_count} ->
-        %{"Count" => last_count + Map.get(query_info, "Count", 0),
-          "ScannedCount" => last_scanned_count + Map.get(query_info, "ScannedCount", 0),
-          "LastEvaluatedKey" => Map.get(fetch_result, "LastEvaluatedKey")}
+    updated_query_info =
+      case fetch_result do
+        %{"Count" => last_count, "ScannedCount" => last_scanned_count} ->
+          %{
+            "Count" => last_count + Map.get(query_info, "Count", 0),
+            "ScannedCount" => last_scanned_count + Map.get(query_info, "ScannedCount", 0),
+            "LastEvaluatedKey" => Map.get(fetch_result, "LastEvaluatedKey")
+          }
 
-      _ -> query_info
-    end
+        _ ->
+          query_info
+      end
 
-    items = case fetch_result do
-      %{"Items" => fetch_items}   -> fetch_items
-      %{"Item" => item}           -> [item]
-      %{"Responses" => table_map} -> table_map[table]
-      _                           -> []
-    end
+    items =
+      case fetch_result do
+        %{"Items" => fetch_items} -> fetch_items
+        %{"Item" => item} -> [item]
+        %{"Responses" => table_map} -> table_map[table]
+        _ -> []
+      end
 
-    num_updated = if items != [] do
-      batch_update(table, items, key_list, update_options, set_remove_fields, opts)
-    else
-      0
-    end
+    num_updated =
+      if items != [] do
+        batch_update(table, items, key_list, update_options, set_remove_fields, opts)
+      else
+        0
+      end
 
     updated_recursive = Ecto.Adapters.DynamoDB.Query.update_recursive_option(recursive)
 
     if fetch_result["LastEvaluatedKey"] != nil and updated_recursive.continue do
-        opts_with_offset = opts ++ [exclusive_start_key: fetch_result["LastEvaluatedKey"]]
-        update_all_recursive(table, lookup_fields, opts_with_offset, update_options, key_list, set_remove_fields, updated_recursive.new_value, updated_query_info, total_updated + num_updated)
+      opts_with_offset = opts ++ [exclusive_start_key: fetch_result["LastEvaluatedKey"]]
+
+      update_all_recursive(
+        table,
+        lookup_fields,
+        opts_with_offset,
+        update_options,
+        key_list,
+        set_remove_fields,
+        updated_recursive.new_value,
+        updated_query_info,
+        total_updated + num_updated
+      )
     else
-      if opts[:query_info_key], do: Ecto.Adapters.DynamoDB.QueryInfo.put(opts[:query_info_key], updated_query_info)
+      if opts[:query_info_key],
+        do: Ecto.Adapters.DynamoDB.QueryInfo.put(opts[:query_info_key], updated_query_info)
+
       {total_updated + num_updated, []}
     end
   end
 
   defp batch_update(table, items, key_list, update_options, set_remove_fields, opts) do
-    Enum.reduce(items, 0, fn(result_to_update, acc) ->
+    Enum.reduce(items, 0, fn result_to_update, acc ->
       filters = get_key_values_dynamo_map(result_to_update, key_list)
 
       # we only update this on a case-by-case basis if pull actions
       # without specific indexes are specified
-      options_with_set_and_remove = case set_remove_fields do
-        [] -> update_options
-        _  ->
-          pull_fields_with_indexes =
-            Enum.map(set_remove_fields[:pull], fn {field_atom, val} ->
-              list = result_to_update[to_string(field_atom)]
-              {field_atom, find_all_indexes_in_dynamodb_list(list, val)}
-            end)
-          merged_pull_indexes = Keyword.merge(pull_fields_with_indexes, maybe_list(opts[:pull_indexes]))
-          opts_with_pull_indexes = Keyword.update(opts, :pull_indexes, merged_pull_indexes, fn _ -> merged_pull_indexes end)
+      options_with_set_and_remove =
+        case set_remove_fields do
+          [] ->
+            update_options
 
-          update_batch_update_options(update_options, set_remove_fields, opts_with_pull_indexes)
-      end
+          _ ->
+            pull_fields_with_indexes =
+              Enum.map(set_remove_fields[:pull], fn {field_atom, val} ->
+                list = result_to_update[to_string(field_atom)]
+                {field_atom, find_all_indexes_in_dynamodb_list(list, val)}
+              end)
+
+            merged_pull_indexes =
+              Keyword.merge(pull_fields_with_indexes, maybe_list(opts[:pull_indexes]))
+
+            opts_with_pull_indexes =
+              Keyword.update(opts, :pull_indexes, merged_pull_indexes, fn _ ->
+                merged_pull_indexes
+              end)
+
+            update_batch_update_options(update_options, set_remove_fields, opts_with_pull_indexes)
+        end
 
       # 'options_with_set_and_remove' might not have the key, ':expression_attribute_values',
       # when there are only removal statements.
-      record = if options_with_set_and_remove[:expression_attribute_values],
-               do: [options_with_set_and_remove[:expression_attribute_values] |> Enum.into(%{})],
-               else: []
+      record =
+        if options_with_set_and_remove[:expression_attribute_values],
+          do: [options_with_set_and_remove[:expression_attribute_values] |> Enum.into(%{})],
+          else: []
 
-      if options_with_set_and_remove[:update_expression] |> String.trim != "" do
-        Dynamo.update_item(table, filters, options_with_set_and_remove) |> ExAws.request |> handle_error!(%{table: table, records: record ++ []})
+      if options_with_set_and_remove[:update_expression] |> String.trim() != "" do
+        Dynamo.update_item(table, filters, options_with_set_and_remove)
+        |> ExAws.request()
+        |> handle_error!(%{table: table, records: record ++ []})
+
         acc + 1
       else
         acc
@@ -496,20 +672,36 @@ defmodule Ecto.Adapters.DynamoDB do
   end
 
   defp update_batch_update_options(update_options, set_remove_fields, opts) do
-    attribute_names = construct_expression_attribute_names(Keyword.values(set_remove_fields) |> List.flatten)
-    set_and_push_fields = maybe_list(set_remove_fields[:set]) ++ maybe_list(set_remove_fields[:push])
+    attribute_names =
+      construct_expression_attribute_names(Keyword.values(set_remove_fields) |> List.flatten())
+
+    set_and_push_fields =
+      maybe_list(set_remove_fields[:set]) ++ maybe_list(set_remove_fields[:push])
+
     opts_with_push = opts ++ Keyword.take(set_remove_fields, [:push])
     attribute_values = construct_expression_attribute_values(set_and_push_fields, opts_with_push)
     set_statement = construct_set_statement(set_remove_fields[:set], opts_with_push)
-    opts_for_construct_remove = Keyword.take(set_remove_fields, [:pull]) ++ Keyword.take(opts, [:pull_indexes, :remove_nil_fields])
-    remove_statement = construct_remove_statement(set_remove_fields[:set], opts_for_construct_remove)
 
-    base_update_options =
-      [expression_attribute_names: Map.merge(attribute_names, update_options[:expression_attribute_names]),
-      update_expression: set_statement <> " " <> remove_statement <> " " <> update_options[:update_expression] |> String.trim,
-      return_values: :all_new]
+    opts_for_construct_remove =
+      Keyword.take(set_remove_fields, [:pull]) ++
+        Keyword.take(opts, [:pull_indexes, :remove_nil_fields])
 
-    maybe_add_attribute_values(base_update_options, attribute_values ++ maybe_list(update_options[:expression_attribute_values]))
+    remove_statement =
+      construct_remove_statement(set_remove_fields[:set], opts_for_construct_remove)
+
+    base_update_options = [
+      expression_attribute_names:
+        Map.merge(attribute_names, update_options[:expression_attribute_names]),
+      update_expression:
+        (set_statement <> " " <> remove_statement <> " " <> update_options[:update_expression])
+        |> String.trim(),
+      return_values: :all_new
+    ]
+
+    maybe_add_attribute_values(
+      base_update_options,
+      attribute_values ++ maybe_list(update_options[:expression_attribute_values])
+    )
   end
 
   # find indexes to remove for update :pull action
@@ -520,7 +712,6 @@ defmodule Ecto.Adapters.DynamoDB do
     |> Enum.map(fn {_, i} -> i end)
   end
 
-
   # During delete_all's and update_all's recursive
   # procedure, we want to keep the recursion in
   # the top-level, between actions, rather than
@@ -529,7 +720,6 @@ defmodule Ecto.Adapters.DynamoDB do
   defp prepare_recursive_opts(opts) do
     opts |> Keyword.delete(:page_limit) |> Keyword.update(:recursive, false, fn _ -> false end)
   end
-
 
   @doc """
   Inserts a single new struct in the data store.
@@ -540,23 +730,35 @@ defmodule Ecto.Adapters.DynamoDB do
   field has type `:id` or `:binary_id` and no value was set by the
   developer or none was autogenerated by the adapter.
   """
-  #@callback insert(repo, schema_meta, fields, on_conflict, returning, options) ::
+  # @callback insert(repo, schema_meta, fields, on_conflict, returning, options) ::
   #                  {:ok, fields} | {:invalid, constraints} | no_return
   #  def insert(_,_,_,_,_) do
   @impl Ecto.Adapter.Schema
   @spec insert(
-    Ecto.Adapter.Schema.adapter_meta(),
-    Ecto.Adapter.Schema.schema_meta(),
-    Ecto.Adapter.Schema.fields(),
-    Ecto.Adapter.Schema.on_conflict(),
-    Ecto.Adapter.Schema.returning(),
-    Ecto.Adapter.Schema.options()
-  ) :: {:ok, Ecto.Adapter.Schema.fields()} | {:invalid, Ecto.Adapter.Schema.constraints()}
+          Ecto.Adapter.Schema.adapter_meta(),
+          Ecto.Adapter.Schema.schema_meta(),
+          Ecto.Adapter.Schema.fields(),
+          Ecto.Adapter.Schema.on_conflict(),
+          Ecto.Adapter.Schema.returning(),
+          Ecto.Adapter.Schema.options()
+        ) :: {:ok, Ecto.Adapter.Schema.fields()} | {:invalid, Ecto.Adapter.Schema.constraints()}
   def insert(repo, schema_meta, fields, on_conflict, returning, opts) do
-    ecto_dynamo_log(:debug, "#{inspect __MODULE__}.insert", %{"#{inspect __MODULE__}.insert-params" => %{repo: repo, schema_meta: schema_meta, fields: fields, on_conflict: on_conflict, returning: returning, opts: opts}})
+    ecto_dynamo_log(:debug, "#{inspect(__MODULE__)}.insert", %{
+      "#{inspect(__MODULE__)}.insert-params" => %{
+        repo: repo,
+        schema_meta: schema_meta,
+        fields: fields,
+        on_conflict: on_conflict,
+        returning: returning,
+        opts: opts
+      }
+    })
 
     insert_nil_field_option = Keyword.get(opts, :insert_nil_fields, true)
-    do_not_insert_nil_fields = insert_nil_field_option == false || Application.get_env(:ecto_adapters_dynamodb, :insert_nil_fields) == false
+
+    do_not_insert_nil_fields =
+      insert_nil_field_option == false ||
+        Application.get_env(:ecto_adapters_dynamodb, :insert_nil_fields) == false
 
     # {_, table} = schema_meta.source
 
@@ -565,34 +767,48 @@ defmodule Ecto.Adapters.DynamoDB do
 
     model = schema_meta.schema
     fields_map = Enum.into(fields, %{})
-    record = if do_not_insert_nil_fields, do: fields_map, else: build_record_map(model, fields_map)
 
-    ecto_dynamo_log(:info, "#{inspect __MODULE__}.insert: local variables", %{"#{inspect __MODULE__}.insert-vars" => %{table: table, record: record}})
+    record =
+      if do_not_insert_nil_fields, do: fields_map, else: build_record_map(model, fields_map)
+
+    ecto_dynamo_log(:info, "#{inspect(__MODULE__)}.insert: local variables", %{
+      "#{inspect(__MODULE__)}.insert-vars" => %{table: table, record: record}
+    })
 
     {:primary, key_list} = Ecto.Adapters.DynamoDB.Info.primary_key!(table)
     hash_key = hd(key_list)
 
     on_conflict_action = elem(on_conflict, 0)
 
-    options = case on_conflict_action do
-      :replace_all -> []
-      _ ->
-        attribute_names = for k <- key_list, into: %{}, do: {"##{k}", k}
-        conditions = for k <- key_list, do: "attribute_not_exists(##{k})"
-        condition_expression = Enum.join(conditions, " and ")
-        [expression_attribute_names: attribute_names,
-         condition_expression: condition_expression]
-    end
+    options =
+      case on_conflict_action do
+        :replace_all ->
+          []
 
-    case Dynamo.put_item(table, record, options) |> ExAws.request |> handle_error!(%{table: table, records: [record]}) do
+        _ ->
+          attribute_names = for k <- key_list, into: %{}, do: {"##{k}", k}
+          conditions = for k <- key_list, do: "attribute_not_exists(##{k})"
+          condition_expression = Enum.join(conditions, " and ")
+
+          [
+            expression_attribute_names: attribute_names,
+            condition_expression: condition_expression
+          ]
+      end
+
+    case Dynamo.put_item(table, record, options)
+         |> ExAws.request()
+         |> handle_error!(%{table: table, records: [record]}) do
       {:error, "ConditionalCheckFailedException"} ->
         case on_conflict_action do
           # Per discussion with Jose Valim (https://github.com/elixir-ecto/ecto/issues/2378)
           # clarifying the adapter should return nothing if there is no `:returning` specified,
           # and what we thought was to be returned as a `nil` id, is only for cases where
           # "the field is autogenerated by the database" (https://hexdocs.pm/ecto/Ecto.Repo.html)
-          :nothing -> {:ok, []}
-          :raise   ->
+          :nothing ->
+            {:ok, []}
+
+          :raise ->
             # This constraint name yields the correct behavior in the case the user
             # has specified a unique constraint on the primary key in their schema:
             constraint_name = "#{table}_#{hash_key}_index"
@@ -606,31 +822,54 @@ defmodule Ecto.Adapters.DynamoDB do
 
   @impl Ecto.Adapter.Schema
   @spec insert_all(
-    Ecto.Adapter.Schema.adapter_meta(),
-    Ecto.Adapter.Schema.schema_meta(),
-    header :: [atom()],
-    [[{atom(), term() | {Ecto.Query.t(), list()}}]],
-    Ecto.Adapter.Schema.on_conflict(),
-    Ecto.Adapter.Schema.returning(),
-    Ecto.Adapter.Schema.options()
-  ) :: {integer(), [[term()]] | nil}
+          Ecto.Adapter.Schema.adapter_meta(),
+          Ecto.Adapter.Schema.schema_meta(),
+          header :: [atom()],
+          [[{atom(), term() | {Ecto.Query.t(), list()}}]],
+          Ecto.Adapter.Schema.on_conflict(),
+          Ecto.Adapter.Schema.returning(),
+          Ecto.Adapter.Schema.options()
+        ) :: {integer(), [[term()]] | nil}
   def insert_all(repo, schema_meta, field_list, fields, on_conflict, returning, opts) do
-    ecto_dynamo_log(:debug, "#{inspect __MODULE__}.insert_all", %{"#{inspect __MODULE__}.insert_all-params" => %{repo: repo, schema_meta: schema_meta, field_list: field_list, fields: fields, on_conflict: on_conflict, returning: returning, opts: opts}})
+    ecto_dynamo_log(:debug, "#{inspect(__MODULE__)}.insert_all", %{
+      "#{inspect(__MODULE__)}.insert_all-params" => %{
+        repo: repo,
+        schema_meta: schema_meta,
+        field_list: field_list,
+        fields: fields,
+        on_conflict: on_conflict,
+        returning: returning,
+        opts: opts
+      }
+    })
 
     insert_nil_field_option = Keyword.get(opts, :insert_nil_fields, true)
-    do_not_insert_nil_fields = insert_nil_field_option == false || Application.get_env(:ecto_adapters_dynamodb, :insert_nil_fields) == false
+
+    do_not_insert_nil_fields =
+      insert_nil_field_option == false ||
+        Application.get_env(:ecto_adapters_dynamodb, :insert_nil_fields) == false
 
     {_, table} = schema_meta.source
     model = schema_meta.schema
 
-    prepared_fields = Enum.map(fields, fn(field_set) ->
-      mapped_fields = Enum.into(field_set, %{})
-      record = if do_not_insert_nil_fields, do: mapped_fields, else: build_record_map(model, mapped_fields)
+    prepared_fields =
+      Enum.map(fields, fn field_set ->
+        mapped_fields = Enum.into(field_set, %{})
 
-      [put_request: [item: record]]
-    end)
+        record =
+          if do_not_insert_nil_fields,
+            do: mapped_fields,
+            else: build_record_map(model, mapped_fields)
 
-    ecto_dynamo_log(:info, "#{inspect __MODULE__}.insert_all: local variables", %{"#{inspect __MODULE__}.insert_all-vars" => %{table: table, records: get_records_from_fields(prepared_fields)}})
+        [put_request: [item: record]]
+      end)
+
+    ecto_dynamo_log(:info, "#{inspect(__MODULE__)}.insert_all: local variables", %{
+      "#{inspect(__MODULE__)}.insert_all-vars" => %{
+        table: table,
+        records: get_records_from_fields(prepared_fields)
+      }
+    })
 
     batch_write(table, prepared_fields, opts)
   end
@@ -642,38 +881,65 @@ defmodule Ecto.Adapters.DynamoDB do
     unprocessed_items_element = "UnprocessedItems"
     batch_write_item_limit = 25
     grouped_records = Enum.chunk_every(prepared_fields, batch_write_item_limit)
-    num_batches = length grouped_records
+    num_batches = length(grouped_records)
 
     # Break the prepared_fields into chunks of at most 25 elements to be batch inserted, accumulating
     # the total count of records and appropriate results as it loops through the reduce.
-    {total_processed, results} = grouped_records
-                                 |> Stream.with_index
-                                 |> Enum.reduce({0, []}, fn({field_group, i}, {running_total_processed, batch_write_results}) ->
-                                   {total_batch_processed, batch_write_attempt} = handle_batch_write(field_group, table, unprocessed_items_element)
+    {total_processed, results} =
+      grouped_records
+      |> Stream.with_index()
+      |> Enum.reduce({0, []}, fn {field_group, i},
+                                 {running_total_processed, batch_write_results} ->
+        {total_batch_processed, batch_write_attempt} =
+          handle_batch_write(field_group, table, unprocessed_items_element)
 
-                                   # Log depth of 11 will capture the full data structure returned in any UnprocessedItems - https://docs.aws.amazon.com/amazondynamodb/latest/APIReference/API_BatchWriteItem.html
-                                   ecto_dynamo_log(:debug, "#{inspect __MODULE__}.batch_write #{i + 1} of #{num_batches}: local variables", %{"#{inspect __MODULE__}.insert_all-batch_write" => %{table: table, field_group: field_group, results: batch_write_attempt}}, [depth: 11])
+        # Log depth of 11 will capture the full data structure returned in any UnprocessedItems - https://docs.aws.amazon.com/amazondynamodb/latest/APIReference/API_BatchWriteItem.html
+        ecto_dynamo_log(
+          :debug,
+          "#{inspect(__MODULE__)}.batch_write #{i + 1} of #{num_batches}: local variables",
+          %{
+            "#{inspect(__MODULE__)}.insert_all-batch_write" => %{
+              table: table,
+              field_group: field_group,
+              results: batch_write_attempt
+            }
+          },
+          depth: 11
+        )
 
-                                   # We're not retrying unprocessed items yet, but we are providing the relevant info in the QueryInfo agent if :query_info_key is supplied
-                                   if opts[:query_info_key] do
-                                     query_info = extract_query_info(batch_write_attempt)
-                                     Ecto.Adapters.DynamoDB.QueryInfo.update(opts[:query_info_key], [query_info], fn(list) -> list ++ [query_info] end)
-                                   end
+        # We're not retrying unprocessed items yet, but we are providing the relevant info in the QueryInfo agent if :query_info_key is supplied
+        if opts[:query_info_key] do
+          query_info = extract_query_info(batch_write_attempt)
 
-                                   {running_total_processed + total_batch_processed, batch_write_results ++ [batch_write_attempt]}
-                                 end)
+          Ecto.Adapters.DynamoDB.QueryInfo.update(opts[:query_info_key], [query_info], fn list ->
+            list ++ [query_info]
+          end)
+        end
 
-    result_body_for_log = %{table => Enum.flat_map(results, fn(res) -> res[unprocessed_items_element][table] || [] end)}
-    
-    ecto_dynamo_log(:info, "#{inspect __MODULE__}.batch_write: batch_write_attempt result", %{"#{inspect __MODULE__}.insert_all-batch_write" => inspect %{unprocessed_items_element => (if result_body_for_log[table] == [], do: %{}, else: result_body_for_log)}})
+        {running_total_processed + total_batch_processed,
+         batch_write_results ++ [batch_write_attempt]}
+      end)
+
+    result_body_for_log = %{
+      table => Enum.flat_map(results, fn res -> res[unprocessed_items_element][table] || [] end)
+    }
+
+    ecto_dynamo_log(:info, "#{inspect(__MODULE__)}.batch_write: batch_write_attempt result", %{
+      "#{inspect(__MODULE__)}.insert_all-batch_write" =>
+        inspect(%{
+          unprocessed_items_element =>
+            if(result_body_for_log[table] == [], do: %{}, else: result_body_for_log)
+        })
+    })
 
     {total_processed, nil}
   end
 
   defp handle_batch_write(field_group, table, unprocessed_items_element) do
-    results = Dynamo.batch_write_item(%{table => field_group})
-              |> ExAws.request
-              |> handle_error!(%{table: table, records: get_records_from_fields(field_group)})
+    results =
+      Dynamo.batch_write_item(%{table => field_group})
+      |> ExAws.request()
+      |> handle_error!(%{table: table, records: get_records_from_fields(field_group)})
 
     if results[unprocessed_items_element] == %{} do
       {length(field_group), results}
@@ -682,8 +948,8 @@ defmodule Ecto.Adapters.DynamoDB do
     end
   end
 
-  defp get_records_from_fields(fields), do: Enum.map(fields, fn [put_request: [item: record]] -> record end)
-
+  defp get_records_from_fields(fields),
+    do: Enum.map(fields, fn [put_request: [item: record]] -> record end)
 
   defp build_record_map(model, fields_to_insert) do
     # Ecto does not convert empty strings to nil before passing them
@@ -694,26 +960,42 @@ defmodule Ecto.Adapters.DynamoDB do
     # so we convert these to nil.
     fields = model.__schema__(:fields)
     sources = fields |> Enum.into(%{}, fn f -> {f, model.__schema__(:field_source, f)} end)
-    empty_strings_to_nil = fields_to_insert
-                         |> Enum.map(fn {field, val} -> {field, (if val == "", do: nil, else: val)} end)
-                         |> Enum.into(%{})
+
+    empty_strings_to_nil =
+      fields_to_insert
+      |> Enum.map(fn {field, val} -> {field, if(val == "", do: nil, else: val)} end)
+      |> Enum.into(%{})
+
     model.__struct__
     |> Map.delete(:__meta__)
-    |> Map.from_struct
+    |> Map.from_struct()
     |> Enum.reduce(%{}, fn {k, v}, acc ->
       Map.put(acc, Map.get(sources, k), v)
     end)
     |> Map.merge(empty_strings_to_nil)
   end
 
-
   # In testing, 'filters' contained only the primary key and value
   # TODO: handle cases of more than one tuple in 'filters'?
   @impl Ecto.Adapter.Schema
-  @spec delete(Ecto.Adapter.Schema.adapter_meta(), Ecto.Adapter.Schema.schema_meta(), Ecto.Adapter.Schema.filters(), Ecto.Adapter.Schema.options()) ::
-  {:ok, Ecto.Adapter.Schema.fields()} | {:invalid, Ecto.Adapter.Schema.constraints()} | {:error, :stale}
+  @spec delete(
+          Ecto.Adapter.Schema.adapter_meta(),
+          Ecto.Adapter.Schema.schema_meta(),
+          Ecto.Adapter.Schema.filters(),
+          Ecto.Adapter.Schema.options()
+        ) ::
+          {:ok, Ecto.Adapter.Schema.fields()}
+          | {:invalid, Ecto.Adapter.Schema.constraints()}
+          | {:error, :stale}
   def delete(repo, schema_meta, filters, opts) do
-    ecto_dynamo_log(:debug, "#{inspect __MODULE__}.delete", %{"#{inspect __MODULE__}.delete-params" => %{repo: repo, schema_meta: schema_meta, filters: filters, opts: opts}})
+    ecto_dynamo_log(:debug, "#{inspect(__MODULE__)}.delete", %{
+      "#{inspect(__MODULE__)}.delete-params" => %{
+        repo: repo,
+        schema_meta: schema_meta,
+        filters: filters,
+        opts: opts
+      }
+    })
 
     {_, table} = schema_meta.source
 
@@ -721,33 +1003,50 @@ defmodule Ecto.Adapters.DynamoDB do
     # since Ecto will not provide the range_key value needed for the query.
     # If :range_key is not provided, check if the table has a composite
     # primary key and query for all the key values
-    updated_filters = case opts[:range_key] do
-      nil ->
-        {:primary, key_list} = Ecto.Adapters.DynamoDB.Info.primary_key!(table)
-        if (length key_list) > 1 do
-          updated_opts = opts ++ [projection_expression: Enum.join(key_list, ", ")]
-          filters_as_strings = for {field, val} <- filters, do: {Atom.to_string(field), {val, :==}}
-          fetch_result = Ecto.Adapters.DynamoDB.Query.get_item(table, filters_as_strings, updated_opts)
-          items = case fetch_result do
-            %{"Items" => fetch_items} -> fetch_items
-            %{"Item" => item}         -> [item]
-            _                         -> []
+    updated_filters =
+      case opts[:range_key] do
+        nil ->
+          {:primary, key_list} = Ecto.Adapters.DynamoDB.Info.primary_key!(table)
+
+          if length(key_list) > 1 do
+            updated_opts = opts ++ [projection_expression: Enum.join(key_list, ", ")]
+
+            filters_as_strings =
+              for {field, val} <- filters, do: {Atom.to_string(field), {val, :==}}
+
+            fetch_result =
+              Ecto.Adapters.DynamoDB.Query.get_item(table, filters_as_strings, updated_opts)
+
+            items =
+              case fetch_result do
+                %{"Items" => fetch_items} -> fetch_items
+                %{"Item" => item} -> [item]
+                _ -> []
+              end
+
+            if items == [],
+              do:
+                raise("__MODULE__.update error: no results found for record: #{inspect(filters)}")
+
+            if length(items) > 1,
+              do:
+                raise(
+                  "__MODULE__.update error: more than one result found for record: #{
+                    inspect(filters)
+                  } Please consider using the adapter's :range_key custom inline option (see README)."
+                )
+
+            for {field, key_map} <- Map.to_list(hd(items)) do
+              [{_field_type, val}] = Map.to_list(key_map)
+              {field, val}
+            end
+          else
+            filters
           end
 
-          if items == [], do: raise "__MODULE__.update error: no results found for record: #{inspect filters}"
-          if (length items) > 1, do: raise "__MODULE__.update error: more than one result found for record: #{inspect filters} Please consider using the adapter's :range_key custom inline option (see README)."
-
-          for {field, key_map} <- Map.to_list(hd items) do
-            [{_field_type, val}] = Map.to_list(key_map)
-            {field, val}
-          end
-         else
-          filters
-         end
-
-      range_key ->
-        [range_key | filters]
-    end
+        range_key ->
+          [range_key | filters]
+      end
 
     attribute_names = construct_expression_attribute_names(keys_to_atoms(filters))
 
@@ -756,26 +1055,42 @@ defmodule Ecto.Adapters.DynamoDB do
     options = base_options ++ [condition_expression: condition_expression]
 
     # 'options' might not have the key, ':expression_attribute_values', when there are only removal statements
-    record = if options[:expression_attribute_values], do: [options[:expression_attribute_values] |> Enum.into(%{})], else: []
+    record =
+      if options[:expression_attribute_values],
+        do: [options[:expression_attribute_values] |> Enum.into(%{})],
+        else: []
 
-    case Dynamo.delete_item(table, updated_filters, options) |> ExAws.request |> handle_error!(%{table: table, records: record ++ []}) do
+    case Dynamo.delete_item(table, updated_filters, options)
+         |> ExAws.request()
+         |> handle_error!(%{table: table, records: record ++ []}) do
       %{} -> {:ok, []}
       {:error, "ConditionalCheckFailedException"} -> {:error, :stale}
     end
   end
 
-
   @impl Ecto.Adapter.Schema
   @spec update(
-    Ecto.Adapter.Schema.adapter_meta(),
-    Ecto.Adapter.Schema.schema_meta(),
-    Ecto.Adapter.Schema.fields(),
-    Ecto.Adapter.Schema.filters(),
-    Ecto.Adapter.Schema.returning(),
-    Ecto.Adapter.Schema.options()
-  ) :: {:ok, Ecto.Adapter.Schema.fields()} | {:invalid, Ecto.Adapter.Schema.constraints()} | {:error, :stale}
+          Ecto.Adapter.Schema.adapter_meta(),
+          Ecto.Adapter.Schema.schema_meta(),
+          Ecto.Adapter.Schema.fields(),
+          Ecto.Adapter.Schema.filters(),
+          Ecto.Adapter.Schema.returning(),
+          Ecto.Adapter.Schema.options()
+        ) ::
+          {:ok, Ecto.Adapter.Schema.fields()}
+          | {:invalid, Ecto.Adapter.Schema.constraints()}
+          | {:error, :stale}
   def update(repo, schema_meta, fields, filters, returning, opts) do
-    ecto_dynamo_log(:debug, "#{inspect __MODULE__}.update", %{"#{inspect __MODULE__}.update-params" => %{repo: repo, schema_meta: schema_meta, fields: fields, filters: filters, returning: returning, opts: opts}})
+    ecto_dynamo_log(:debug, "#{inspect(__MODULE__)}.update", %{
+      "#{inspect(__MODULE__)}.update-params" => %{
+        repo: repo,
+        schema_meta: schema_meta,
+        fields: fields,
+        filters: filters,
+        returning: returning,
+        opts: opts
+      }
+    })
 
     {_, table} = schema_meta.source
 
@@ -783,88 +1098,138 @@ defmodule Ecto.Adapters.DynamoDB do
     # since Ecto will not provide the range_key value needed for the query.
     # If :range_key is not provided, check if the table has a composite
     # primary key and query for all the key values
-    updated_filters = case opts[:range_key] do
-      nil ->
-        {:primary, key_list} = Ecto.Adapters.DynamoDB.Info.primary_key!(table)
-        if (length key_list) > 1 do
-          updated_opts = opts ++ [projection_expression: Enum.join(key_list, ", ")]
-          filters_as_strings = for {field, val} <- filters, do: {Atom.to_string(field), {val, :==}}
-          fetch_result = Ecto.Adapters.DynamoDB.Query.get_item(table, filters_as_strings, updated_opts)
-          items = case fetch_result do
-            %{"Items" => fetch_items} -> fetch_items
-            %{"Item" => item}         -> [item]
-            _                         -> []
+    updated_filters =
+      case opts[:range_key] do
+        nil ->
+          {:primary, key_list} = Ecto.Adapters.DynamoDB.Info.primary_key!(table)
+
+          if length(key_list) > 1 do
+            updated_opts = opts ++ [projection_expression: Enum.join(key_list, ", ")]
+
+            filters_as_strings =
+              for {field, val} <- filters, do: {Atom.to_string(field), {val, :==}}
+
+            fetch_result =
+              Ecto.Adapters.DynamoDB.Query.get_item(table, filters_as_strings, updated_opts)
+
+            items =
+              case fetch_result do
+                %{"Items" => fetch_items} -> fetch_items
+                %{"Item" => item} -> [item]
+                _ -> []
+              end
+
+            if items == [],
+              do:
+                raise("__MODULE__.update error: no results found for record: #{inspect(filters)}")
+
+            if length(items) > 1,
+              do:
+                raise(
+                  "__MODULE__.update error: more than one result found for record: #{
+                    inspect(filters)
+                  } Please consider using the adapter's :range_key custom inline option (see README)."
+                )
+
+            for {field, key_map} <- Map.to_list(hd(items)) do
+              [{_field_type, val}] = Map.to_list(key_map)
+              {field, val}
+            end
+          else
+            filters
           end
 
-          if items == [], do: raise "__MODULE__.update error: no results found for record: #{inspect filters}"
-          if (length items) > 1, do: raise "__MODULE__.update error: more than one result found for record: #{inspect filters} Please consider using the adapter's :range_key custom inline option (see README)."
-
-          for {field, key_map} <- Map.to_list(hd items) do
-            [{_field_type, val}] = Map.to_list(key_map)
-            {field, val}
-          end
-         else
-          filters
-         end
-
-      range_key ->
-        [range_key | filters]
-    end
+        range_key ->
+          [range_key | filters]
+      end
 
     update_expression = construct_update_expression(fields, opts)
     # add updated_filters to attribute_ names and values for condition_expression
     attribute_names = construct_expression_attribute_names(fields ++ keys_to_atoms(filters))
     attribute_values = construct_expression_attribute_values(fields, opts)
 
-    base_options = [expression_attribute_names: attribute_names,
-                    update_expression: update_expression]
+    base_options = [
+      expression_attribute_names: attribute_names,
+      update_expression: update_expression
+    ]
+
     condition_expression = construct_condition_expression(filters)
-    options = maybe_add_attribute_values(base_options, attribute_values)
-           ++ [condition_expression: condition_expression]
+
+    options =
+      maybe_add_attribute_values(base_options, attribute_values) ++
+        [condition_expression: condition_expression]
 
     # 'options' might not have the key, ':expression_attribute_values', when there are only removal statements
-    record = if options[:expression_attribute_values], do: [options[:expression_attribute_values] |> Enum.into(%{})], else: []
+    record =
+      if options[:expression_attribute_values],
+        do: [options[:expression_attribute_values] |> Enum.into(%{})],
+        else: []
 
-    case Dynamo.update_item(table, updated_filters, options) |> ExAws.request |> handle_error!(%{table: table, records: record ++ []}) do
+    case Dynamo.update_item(table, updated_filters, options)
+         |> ExAws.request()
+         |> handle_error!(%{table: table, records: record ++ []}) do
       %{} -> {:ok, []}
       {:error, "ConditionalCheckFailedException"} -> {:error, :stale}
     end
   end
 
   defp keys_to_atoms(list),
-  do: for {k, v} <- list, do: {maybe_string_to_atom(k), v}
+    do: for({k, v} <- list, do: {maybe_string_to_atom(k), v})
 
   defp maybe_string_to_atom(s),
-  do: if is_binary(s), do: String.to_atom(s), else: s
+    do: if(is_binary(s), do: String.to_atom(s), else: s)
 
   defp construct_condition_expression([{field, _val}] = _filters),
-  do: "attribute_exists(##{to_string(field)})"
+    do: "attribute_exists(##{to_string(field)})"
 
-  defp extract_query_info(result), do: result |> Map.take(["Count", "ScannedCount", "LastEvaluatedKey", "UnprocessedItems", "UnprocessedKeys"])
-
+  defp extract_query_info(result),
+    do:
+      result
+      |> Map.take([
+        "Count",
+        "ScannedCount",
+        "LastEvaluatedKey",
+        "UnprocessedItems",
+        "UnprocessedKeys"
+      ])
 
   # Used in update_all
   defp extract_update_params([], _action_atom, _params), do: []
+
   defp extract_update_params([%{expr: key_list}], action_atom, params) do
     case key_list[action_atom] do
       nil ->
         []
+
       action_list ->
         for s <- action_list do
           {field_atom, {:^, _, [idx]}} = s
-          {field_atom, Enum.at(params,idx)}
+          {field_atom, Enum.at(params, idx)}
         end
     end
   end
 
-  defp extract_update_params([a], _action_atom, _params), do: error "#{inspect __MODULE__}.extract_update_params: Updates is either missing the :expr key or does not contain a struct or map: #{inspect a}"
-  defp extract_update_params(unsupported, _action_atom, _params), do: error "#{inspect __MODULE__}.extract_update_params: unsupported parameter construction. #{inspect unsupported}"
+  defp extract_update_params([a], _action_atom, _params),
+    do:
+      error(
+        "#{inspect(__MODULE__)}.extract_update_params: Updates is either missing the :expr key or does not contain a struct or map: #{
+          inspect(a)
+        }"
+      )
+
+  defp extract_update_params(unsupported, _action_atom, _params),
+    do:
+      error(
+        "#{inspect(__MODULE__)}.extract_update_params: unsupported parameter construction. #{
+          inspect(unsupported)
+        }"
+      )
 
   # Ecto does not support push pull for types other than array.
   # Therefore, we enable add and delete via opts
   defp extract_update_params(key_list, action_atom) do
     case key_list[action_atom] do
-      nil         -> []
+      nil -> []
       action_list -> action_list
     end
   end
@@ -874,13 +1239,14 @@ defmodule Ecto.Adapters.DynamoDB do
     for k <- keys, do: {String.to_atom(k), Dynamo.Decoder.decode(dynamo_map[k])}
   end
 
-
   defp construct_expression_attribute_names(fields) do
     for {f, _} <- fields, into: %{}, do: {"##{Atom.to_string(f)}", Atom.to_string(f)}
   end
 
   defp construct_expression_attribute_values(fields, opts) do
-    remove_rather_than_set_to_null = opts[:remove_nil_fields] || Application.get_env(:ecto_adapters_dynamodb, :remove_nil_fields_on_update) == true
+    remove_rather_than_set_to_null =
+      opts[:remove_nil_fields] ||
+        Application.get_env(:ecto_adapters_dynamodb, :remove_nil_fields_on_update) == true
 
     # If the value is nil and the :remove_nil_fields option is set,
     # we're removing this attribute, not updating it, so filter out any such fields:
@@ -889,7 +1255,8 @@ defmodule Ecto.Adapters.DynamoDB do
       for {k, v} <- fields, !is_nil(v), do: {k, format_val(k, v, opts)}
     else
       for {k, v} <- fields, do: {k, format_nil(k, v, opts)}
-    end |> Enum.filter(fn {x, _} -> not Keyword.has_key?(maybe_list(opts[:pull]), x) end)
+    end
+    |> Enum.filter(fn {x, _} -> not Keyword.has_key?(maybe_list(opts[:pull]), x) end)
   end
 
   defp maybe_list(l) when is_list(l), do: l
@@ -901,7 +1268,7 @@ defmodule Ecto.Adapters.DynamoDB do
   defp format_val(k, v, opts) do
     case opts[:push][k] do
       nil -> v
-      _   -> [v]
+      _ -> [v]
     end
   end
 
@@ -911,6 +1278,7 @@ defmodule Ecto.Adapters.DynamoDB do
   defp maybe_add_attribute_values(options, []) do
     options
   end
+
   defp maybe_add_attribute_values(options, attribute_values) do
     [expression_attribute_values: attribute_values] ++ options
   end
@@ -922,10 +1290,10 @@ defmodule Ecto.Adapters.DynamoDB do
     to_add = extract_update_params(opts, :add) ++ extract_update_params(updates, :inc, params)
     to_delete = extract_update_params(opts, :delete)
 
-    {construct_add_statement(to_add, opts) <> " " <>
-     construct_delete_statement(to_delete, opts) |> String.trim(),
-     to_add ++ to_delete,
-     [set: to_set, push: to_push, pull: to_pull]}
+    {(construct_add_statement(to_add, opts) <>
+        " " <>
+        construct_delete_statement(to_delete, opts))
+     |> String.trim(), to_add ++ to_delete, [set: to_set, push: to_push, pull: to_pull]}
   end
 
   # The update callback supplies fields in the paramaters
@@ -940,58 +1308,71 @@ defmodule Ecto.Adapters.DynamoDB do
 
   # fields::[{:field, val}]
   defp construct_set_statement(fields, opts) do
-    remove_rather_than_set_to_null = opts[:remove_nil_fields] || Application.get_env(:ecto_adapters_dynamodb, :remove_nil_fields_on_update) == true
+    remove_rather_than_set_to_null =
+      opts[:remove_nil_fields] ||
+        Application.get_env(:ecto_adapters_dynamodb, :remove_nil_fields_on_update) == true
 
-    set_clauses = for {key, val} <- fields, not (is_nil(val) and remove_rather_than_set_to_null) do
-      key_str = Atom.to_string(key)
-      "##{key_str}=:#{key_str}"
-    end
-    ++ case opts[:push] do
-      nil       -> []
-      push_list ->
-        for {key, _val} <- push_list do
-          key_str = Atom.to_string(key)
-          if Enum.member?(maybe_list(opts[:prepend_to_list]), key),
-          do: "##{key_str} = list_append(:#{key_str}, ##{key_str})",
-          else: "##{key_str} = list_append(##{key_str}, :#{key_str})"
+    set_clauses =
+      for {key, val} <- fields, not (is_nil(val) and remove_rather_than_set_to_null) do
+        key_str = Atom.to_string(key)
+        "##{key_str}=:#{key_str}"
+      end ++
+        case opts[:push] do
+          nil ->
+            []
+
+          push_list ->
+            for {key, _val} <- push_list do
+              key_str = Atom.to_string(key)
+
+              if Enum.member?(maybe_list(opts[:prepend_to_list]), key),
+                do: "##{key_str} = list_append(:#{key_str}, ##{key_str})",
+                else: "##{key_str} = list_append(##{key_str}, :#{key_str})"
+            end
         end
-    end
 
     case set_clauses do
       [] ->
         ""
+
       _ ->
         "SET " <> Enum.join(set_clauses, ", ")
     end
   end
 
   defp construct_remove_statement(fields, opts) do
-    remove_rather_than_set_to_null = opts[:remove_nil_fields] || Application.get_env(:ecto_adapters_dynamodb, :remove_nil_fields_on_update) == true
+    remove_rather_than_set_to_null =
+      opts[:remove_nil_fields] ||
+        Application.get_env(:ecto_adapters_dynamodb, :remove_nil_fields_on_update) == true
 
+    # Ecto :pull update can be emulated provided
+    # we are given an index to remove in opts[:pull_indexes]
     remove_clauses =
       if remove_rather_than_set_to_null do
         for {key, val} <- fields, is_nil(val), do: "##{Atom.to_string(key)}"
       else
         []
-      end
+      end ++
+        cond do
+          !opts[:pull_indexes] or Keyword.values(opts[:pull_indexes]) |> List.flatten() == [] ->
+            []
 
-    # Ecto :pull update can be emulated provided
-    # we are given an index to remove in opts[:pull_indexes]
-    ++ cond do
-      !opts[:pull_indexes] or (Keyword.values(opts[:pull_indexes]) |> List.flatten) == [] ->
-        []
-      opts[:pull] == nil ->
-        []
-      true ->
-        for {key, _val} <- opts[:pull] do
-          key_str = Atom.to_string(key)
-          Enum.map(opts[:pull_indexes][key], fn index -> "##{key_str}[#{index}]" end) |> Enum.join(", ")
+          opts[:pull] == nil ->
+            []
+
+          true ->
+            for {key, _val} <- opts[:pull] do
+              key_str = Atom.to_string(key)
+
+              Enum.map(opts[:pull_indexes][key], fn index -> "##{key_str}[#{index}]" end)
+              |> Enum.join(", ")
+            end
         end
-    end
 
     case remove_clauses do
       [] ->
         ""
+
       _ ->
         "REMOVE " <> Enum.join(remove_clauses, ", ")
     end
@@ -999,26 +1380,32 @@ defmodule Ecto.Adapters.DynamoDB do
 
   # fields::[{:field, val}]
   defp construct_add_statement(fields, _opts) do
-    add_clauses = for {key, _val} <- fields do
-      key_str = Atom.to_string(key)
-      "##{key_str} :#{key_str}"
-    end
+    add_clauses =
+      for {key, _val} <- fields do
+        key_str = Atom.to_string(key)
+        "##{key_str} :#{key_str}"
+      end
+
     case add_clauses do
       [] ->
         ""
+
       _ ->
         "ADD " <> Enum.join(add_clauses, ", ")
     end
   end
 
   defp construct_delete_statement(fields, _opts) do
-    delete_clauses = for {key, _val} <- fields do
-      key_str = Atom.to_string(key)
-      "##{key_str} :#{key_str}"
-    end
+    delete_clauses =
+      for {key, _val} <- fields do
+        key_str = Atom.to_string(key)
+        "##{key_str} :#{key_str}"
+      end
+
     case delete_clauses do
       [] ->
         ""
+
       _ ->
         "DELETE " <> Enum.join(delete_clauses, ", ")
     end
@@ -1026,21 +1413,32 @@ defmodule Ecto.Adapters.DynamoDB do
 
   defp validate_where_clauses!(query) do
     for w <- query.wheres do
-      validate_where_clause! w
+      validate_where_clause!(w)
     end
   end
-  defp validate_where_clause!(%BooleanExpr{expr: {op, _, _}}) when op in [:==, :<, :>, :<=, :>=, :in], do: :ok
-  defp validate_where_clause!(%BooleanExpr{expr: {logical_op, _, _}}) when logical_op in [:and, :or], do: :ok
+
+  defp validate_where_clause!(%BooleanExpr{expr: {op, _, _}})
+       when op in [:==, :<, :>, :<=, :>=, :in],
+       do: :ok
+
+  defp validate_where_clause!(%BooleanExpr{expr: {logical_op, _, _}})
+       when logical_op in [:and, :or],
+       do: :ok
+
   defp validate_where_clause!(%BooleanExpr{expr: {:is_nil, _, _}}), do: :ok
   defp validate_where_clause!(%BooleanExpr{expr: {:fragment, _, _}}), do: :ok
-  defp validate_where_clause!(unsupported), do: error "unsupported where clause: #{inspect unsupported}"
+
+  defp validate_where_clause!(unsupported),
+    do: error("unsupported where clause: #{inspect(unsupported)}")
 
   defp error(msg) do
     raise ArgumentError, message: msg
   end
 
   defp decode_item(item, _, _, select) do
-    decoded = item |> Enum.map( fn {k,v} -> {String.to_atom(k), ExAws.Dynamo.Decoder.decode(v) } end)
+    decoded =
+      item |> Enum.map(fn {k, v} -> {String.to_atom(k), ExAws.Dynamo.Decoder.decode(v)} end)
+
     fields = Ecto.Adapters.DynamoDB.QueryParser.extract_select_fields(select)
 
     Enum.map(fields, fn key -> Keyword.get(decoded, key) end)
@@ -1052,22 +1450,28 @@ defmodule Ecto.Adapters.DynamoDB do
   # The parameter, 'params', has the type %{table: :string, records: [:map]}
   defp handle_error!(ex_aws_request_result, params) do
     case ex_aws_request_result do
-      {:ok, result}   -> result
+      {:ok, result} ->
+        result
+
       {:error, {error_name, _} = error} ->
         # Check for inappropriate insert into indexed field
         indexed_fields = Ecto.Adapters.DynamoDB.Info.indexed_attributes(params.table)
 
         # Repo.insert_all can present multiple records at once
-        forbidden_insert_on_indexed_field = Enum.reduce(params.records, false, fn (record, acc) ->
-           acc || Enum.any?(record, fn {field, val} ->
-            [type] = ExAws.Dynamo.Encoder.encode(val) |> Map.keys
-            # Ecto does not convert Empty strings to nil before passing them to Repo.update_all or
-            # Repo.insert_all DynamoDB provides an instructive message during an update (forwarded by ExAws),
-            # but less so for batch_write_item, so we catch the empty string as well.
-            # Dynamo does not allow insertion of empty strings in any case.
-            (Enum.member?(indexed_fields, to_string(field)) and not(type in ["S", "N"])) || val == ""
+        forbidden_insert_on_indexed_field =
+          Enum.reduce(params.records, false, fn record, acc ->
+            acc ||
+              Enum.any?(record, fn {field, val} ->
+                [type] = ExAws.Dynamo.Encoder.encode(val) |> Map.keys()
+
+                # Ecto does not convert Empty strings to nil before passing them to Repo.update_all or
+                # Repo.insert_all DynamoDB provides an instructive message during an update (forwarded by ExAws),
+                # but less so for batch_write_item, so we catch the empty string as well.
+                # Dynamo does not allow insertion of empty strings in any case.
+                (Enum.member?(indexed_fields, to_string(field)) and not (type in ["S", "N"])) ||
+                  val == ""
+              end)
           end)
-        end)
 
         cond do
           # we use this error to check if an update or delete record does not exist
@@ -1075,10 +1479,14 @@ defmodule Ecto.Adapters.DynamoDB do
             {:error, error_name}
 
           forbidden_insert_on_indexed_field ->
-            raise "The following request error could be related to attempting to insert an empty string or attempting to insert a type other than a string or number on an indexed field. Indexed fields: #{inspect indexed_fields}. Records: #{inspect params.records}.\n\nExAws Request Error! #{inspect error}"
+            raise "The following request error could be related to attempting to insert an empty string or attempting to insert a type other than a string or number on an indexed field. Indexed fields: #{
+                    inspect(indexed_fields)
+                  }. Records: #{inspect(params.records)}.\n\nExAws Request Error! #{
+                    inspect(error)
+                  }"
 
           true ->
-            raise ExAws.Error, message: "ExAws Request Error! #{inspect error}"
+            raise ExAws.Error, message: "ExAws Request Error! #{inspect(error)}"
         end
     end
   end
@@ -1089,35 +1497,45 @@ defmodule Ecto.Adapters.DynamoDB do
   def ecto_dynamo_log(level, message, attributes \\ %{}, opts \\ []) do
     depth = opts[:depth] || 4
     colours = Application.get_env(:ecto_adapters_dynamodb, :log_colours)
-    d = DateTime.utc_now
-    formatted_message = "#{d.year}-#{d.month}-#{d.day} #{d.hour}:#{d.minute}:#{d.second} UTC [Ecto dynamo #{level}] #{message}"
-    {:ok, log_message} = Poison.encode(%{message: formatted_message, attributes: chisel(attributes, depth)})
+    d = DateTime.utc_now()
+
+    formatted_message =
+      "#{d.year}-#{d.month}-#{d.day} #{d.hour}:#{d.minute}:#{d.second} UTC [Ecto dynamo #{level}] #{
+        message
+      }"
+
+    {:ok, log_message} =
+      Poison.encode(%{message: formatted_message, attributes: chisel(attributes, depth)})
 
     log_path = Application.get_env(:ecto_adapters_dynamodb, :log_path)
     log_levels = Application.get_env(:ecto_adapters_dynamodb, :log_levels) || [:info]
 
     if level in log_levels do
       if Application.get_env(:ecto_adapters_dynamodb, :log_in_colour) do
-        IO.ANSI.format([colours[level] || :normal, log_message], true) |> IO.puts
+        IO.ANSI.format([colours[level] || :normal, log_message], true) |> IO.puts()
       else
-        log_message |> IO.puts
+        log_message |> IO.puts()
       end
 
-      if String.valid?(log_path) and Regex.match?(~r/\S/, log_path), do: log_pipe(log_path, log_message)
+      if String.valid?(log_path) and Regex.match?(~r/\S/, log_path),
+        do: log_pipe(log_path, log_message)
     end
   end
 
   defp chisel(str, _depth) when is_binary(str), do: str
   defp chisel(num, _depth) when is_number(num), do: num
-  defp chisel(any, _depth) when (not is_map(any) and not is_list(any)), do: inspect any
+  defp chisel(any, _depth) when not is_map(any) and not is_list(any), do: inspect(any)
   defp chisel(_, 0), do: "beyond_log_depth"
-  defp chisel(%{__struct__: _} = struct, _depth), do: inspect struct
+  defp chisel(%{__struct__: _} = struct, _depth), do: inspect(struct)
+
   defp chisel(map, depth) when is_map(map) do
     for {k, v} <- map, into: %{}, do: {k, chisel(v, depth - 1)}
   end
+
   defp chisel(list, depth) when is_list(list) do
     for e <- list, do: chisel(e, depth - 1)
-    #Stream.with_index(list) |> Enum.reduce(%{}, fn({v,k}, acc)-> Map.put(acc, k, chisel(v, depth - 1)) end)
+
+    # Stream.with_index(list) |> Enum.reduce(%{}, fn({v,k}, acc)-> Map.put(acc, k, chisel(v, depth - 1)) end)
   end
 
   defp log_pipe(path, str) do
@@ -1125,5 +1543,4 @@ defmodule Ecto.Adapters.DynamoDB do
     IO.binwrite(file, str)
     File.close(file)
   end
-
 end
