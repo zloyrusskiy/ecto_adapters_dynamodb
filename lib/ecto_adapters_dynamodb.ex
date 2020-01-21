@@ -357,7 +357,7 @@ defmodule Ecto.Adapters.DynamoDB do
             {0, []}
 
           %{"Item" => item} ->
-            {1, decode_item(item, nil, [], prepared.select)}
+            {1, [decode_item(item, nil, [], prepared.select)]}
 
           %{"Items" => items} ->
             decoded = Enum.map(items, fn item -> decode_item(item, nil, [], prepared.select) end)
