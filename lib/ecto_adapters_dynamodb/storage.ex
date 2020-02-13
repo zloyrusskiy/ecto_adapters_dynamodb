@@ -1,22 +1,23 @@
 defmodule Ecto.Adapters.DynamoDB.Storage do
-    @behaviour Ecto.Adapter.Storage
+    defmacro __using__(_opts) do
+        quote do
+            @behaviour Ecto.Adapter.Storage
 
-    def __using__(_opts) do
-    end
+            @impl Ecto.Adapter.Storage
+            def storage_down(_options) do
+                :ok
+            end
 
-    @impl true
-    def storage_down(options) do
-        :ok
-    end
+            @impl Ecto.Adapter.Storage
+            def storage_status(_options) do
+                # DynamoDB does not require database creation
+                :up
+            end
 
-    @impl true
-    def storage_status(options) do
-        # DynamoDB does not require database creation
-        :up
-    end
-
-    @impl true
-    def storage_up(options) do
-        :ok
+            @impl Ecto.Adapter.Storage
+            def storage_up(_options) do
+                :ok
+            end
+        end
     end
 end
