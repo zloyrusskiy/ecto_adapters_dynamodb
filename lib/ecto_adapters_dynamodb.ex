@@ -12,10 +12,11 @@ defmodule Ecto.Adapters.DynamoDB do
   # -> queryable.execute
   # -> adapter.execute (possibly prepare somewhere in their too? trace.)
 
+  use Ecto.Adapters.DynamoDB.Storage
+
   @behaviour Ecto.Adapter
   @behaviour Ecto.Adapter.Schema
   @behaviour Ecto.Adapter.Queryable
-  # @behaviour Ecto.Adapter.Storage
   @behaviour Ecto.Adapter.Migration
 
   @typep dynamo_isodate :: String.t()
