@@ -12,6 +12,8 @@ defmodule Ecto.Adapters.DynamoDB do
   # -> queryable.execute
   # -> adapter.execute (possibly prepare somewhere in their too? trace.)
 
+  require Logger
+
   use Ecto.Adapters.DynamoDB.Storage
 
   @behaviour Ecto.Adapter
@@ -1513,9 +1515,10 @@ defmodule Ecto.Adapters.DynamoDB do
 
     if level in log_levels do
       if Application.get_env(:ecto_adapters_dynamodb, :log_in_colour) do
-        IO.ANSI.format([colours[level] || :normal, log_message], true) |> IO.puts()
+        msg = IO.ANSI.format([colours[level] || :normal, log_message], true)
+        Logger.log(level, msg)
       else
-        log_message |> IO.puts()
+        Logger.log(level, log_message)
       end
 
       if String.valid?(log_path) and Regex.match?(~r/\S/, log_path),
