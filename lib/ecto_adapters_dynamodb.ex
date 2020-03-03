@@ -1000,7 +1000,7 @@ defmodule Ecto.Adapters.DynamoDB do
       }
     })
 
-    {_, table} = schema_meta.source
+    table = schema_meta.source
 
     # We offer the :range_key option for tables with composite primary key
     # since Ecto will not provide the range_key value needed for the query.
